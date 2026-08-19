@@ -38,3 +38,22 @@ def test_receta_en_proceso_muestra_el_estado(client, auth):
     client.post("/login", data={"password": "hola", "next": "/"})
     response = client.get(f"/receta/{created['id']}")
     assert "Preparando la receta" in response.text
+
+
+def test_la_receta_de_ejemplo_se_puede_ver_sin_configurar_nada(client):
+    client.post("/login", data={"password": "hola", "next": "/"})
+
+    # El botón aparece cuando el recetario está vacío.
+    assert "Ver una receta de ejemplo" in client.get("/").text
+
+    respuesta = client.post("/ejemplo", follow_redirects=True)
+    assert respuesta.status_code == 200
+    assert "Tortilla de patatas jugosa" in respuesta.text
+    assert "Modo cocina" in respuesta.text
+    assert "Temporizador 20 min" in respuesta.text
+
+
+def test_el_ejemplo_pide_sesion(client):
+    respuesta = client.post("/ejemplo", follow_redirects=False)
+    assert respuesta.status_code == 303
+    assert respuesta.headers["location"].startswith("/login")

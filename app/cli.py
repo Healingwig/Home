@@ -18,13 +18,22 @@ from app.shopping import shopping_payload
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Convierte un vídeo de Instagram en una receta.")
-    parser.add_argument("url", help="Enlace del reel o post")
+    parser.add_argument("url", nargs="?", help="Enlace del reel o post")
+    parser.add_argument(
+        "--ejemplo", action="store_true",
+        help="Guarda una receta de ejemplo para ver la web sin configurar nada",
+    )
     parser.add_argument("--json", action="store_true", help="Volcar la receta en JSON")
     parser.add_argument("--raciones", type=int, default=None, help="Reescalar a N raciones")
     args = parser.parse_args(argv)
 
     settings.ensure_dirs()
     storage.init()
+
+    if args.ejemplo:
+        return _guardar_ejemplo()
+    if not args.url:
+        parser.error("hace falta una URL, o --ejemplo para guardar una receta de muestra")
 
     url = download.normalize_url(args.url)
     recipe_id = storage.create_recipe(url)
@@ -65,6 +74,18 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  ⚠ {warning}")
 
     print(f"\nID de la receta: {recipe_id}", file=sys.stderr)
+    return 0
+
+
+def _guardar_ejemplo() -> int:
+    from app.demo import DEMO_RECIPE
+
+    recipe_id = storage.create_recipe("ejemplo://receta-de-muestra")
+    storage.update_recipe(
+        recipe_id, status="ready", title=DEMO_RECIPE["title"], data=DEMO_RECIPE
+    )
+    print(f"Receta de ejemplo guardada: {DEMO_RECIPE['title']}")
+    print(f"Ábrela en /receta/{recipe_id} y prueba el modo cocina.")
     return 0
 
 

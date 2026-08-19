@@ -32,11 +32,13 @@ class Ingredient(BaseModel):
         return self.model_copy(update={"quantity": self.quantity * factor})
 
     def display_amount(self) -> str:
-        """'250 g', '1/2 cucharadita', 'al gusto'…"""
+        """'250 g', '1/2 cucharadita', '2 unidades', 'al gusto'…"""
         if self.quantity is None:
             return self.unit.strip() if self.unit else ""
         amount = format_quantity(self.quantity)
-        return f"{amount} {self.unit.strip()}" if self.unit else amount
+        if not self.unit:
+            return amount
+        return f"{amount} {pluralize_unit(self.unit.strip(), self.quantity)}"
 
     def shopping_line(self) -> str:
         amount = self.display_amount()
@@ -118,6 +120,39 @@ def format_quantity(value: float) -> str:
             return f"{whole} {label}" if whole else label
 
     return f"{rounded:g}".replace(".", ",")
+
+
+# Unidades que son palabras y sí se pluralizan. Las abreviaturas (g, ml, kg,
+# cda) no llevan plural, así que se quedan fuera a propósito.
+PLURAL_UNITS = {
+    "unidad": "unidades",
+    "diente": "dientes",
+    "hoja": "hojas",
+    "rama": "ramas",
+    "loncha": "lonchas",
+    "rodaja": "rodajas",
+    "rebanada": "rebanadas",
+    "cucharada": "cucharadas",
+    "cucharadita": "cucharaditas",
+    "taza": "tazas",
+    "vaso": "vasos",
+    "pizca": "pizcas",
+    "puñado": "puñados",
+    "lata": "latas",
+    "sobre": "sobres",
+    "paquete": "paquetes",
+    "gota": "gotas",
+    "tira": "tiras",
+    "filete": "filetes",
+    "trozo": "trozos",
+}
+
+
+def pluralize_unit(unit: str, quantity: float) -> str:
+    """'2 unidad' queda mal en la lista de la compra; '2 unidades', no."""
+    if quantity <= 1:
+        return unit
+    return PLURAL_UNITS.get(unit.lower(), unit)
 
 
 def _nullable(kind: str) -> dict[str, Any]:

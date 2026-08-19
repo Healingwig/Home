@@ -318,6 +318,18 @@ def web_create(request: Request, url: str = Form(...)):
     return RedirectResponse(url=f"/receta/{recipe_id}", status_code=303)
 
 
+@app.post("/ejemplo")
+def web_demo(request: Request):
+    """Guarda una receta de muestra: sirve para ver la web sin gastar un reel."""
+    if not security.web_session_ok(request):
+        return _redirect_to_login(request)
+    from app.demo import DEMO_RECIPE
+
+    recipe_id = storage.create_recipe("ejemplo://receta-de-muestra")
+    storage.update_recipe(recipe_id, status="ready", title=DEMO_RECIPE["title"], data=DEMO_RECIPE)
+    return RedirectResponse(url=f"/receta/{recipe_id}", status_code=303)
+
+
 @app.get("/receta/{recipe_id}", response_class=HTMLResponse, name="recipe_page")
 def recipe_page(request: Request, recipe_id: str, servings: int | None = None):
     if not security.web_session_ok(request):

@@ -65,6 +65,10 @@ gcloud run deploy recetas --source . --region us-central1 --allow-unauthenticate
 Te devuelve una URL con HTTPS. Después, **[docs/atajo-ios.md](docs/atajo-ios.md)**
 para montar el Atajo (son siete acciones).
 
+¿No tienes ordenador a mano? **[docs/probarlo.md](docs/probarlo.md)** lo hace
+todo desde la tablet con Google Cloud Shell, probando por partes: primero que
+despliega, luego la web con una receta de ejemplo, y por último Instagram.
+
 ¿Prefieres no dar una tarjeta a Google? Corre igual en tu equipo con
 `docker compose up -d`; la contrapartida está
 [al final del documento de despliegue](docs/despliegue.md#alternativa-sin-tarjeta-en-tu-propio-equipo).
@@ -133,7 +137,8 @@ app/
 │   └── runner.py      orquestación y estados
 ├── templates/         web (Jinja2)
 └── static/            estilos y modo cocina
-docs/                  despliegue y Atajo de iOS
+docs/                  cómo probarlo, despliegue y Atajo de iOS
+scripts/desplegar.sh   despliegue en Cloud Run en un comando
 tests/                 pytest
 ```
 
