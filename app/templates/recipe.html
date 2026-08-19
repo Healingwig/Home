@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}{{ recipe.title if recipe else 'Receta' }}{% endblock %}
+{% block topbar %}
+<a class="btn ghost" href="/">← Recetario</a>
+{% endblock %}
+
+{% block content %}
+{% if row.status in ('pending', 'processing') %}
+  <div class="card status-card" data-poll="{{ row.id }}">
+    <div class="spinner"></div>
+    <h1>Preparando la receta…</h1>
+    <p class="muted">Descargando el vídeo, escuchando el audio y leyendo los fotogramas. Suele tardar entre 30 s y 2 min.</p>
+    <p class="muted small">{{ row.source_url }}</p>
+  </div>
+
+{% elif row.status == 'error' %}
+  <div class="card status-card">
+    <h1>No se pudo procesar</h1>
+    <p class="error">{{ row.error }}</p>
+    <p class="muted small">{{ row.source_url }}</p>
+    <div class="row-actions">
+      <form method="post" action="/receta/{{ row.id }}/reintentar"><button class="primary" type="submit">Reintentar</button></form>
+      <form method="post" action="/receta/{{ row.id }}/borrar"><button class="danger" type="submit">Borrar</button></form>
+    </div>
+  </div>
+
+{% elif recipe %}
+<article class="recipe" data-recipe-id="{{ row.id }}">
+  <header class="recipe-header">
+    {% if row.thumbnail %}<img class="hero" src="/media/{{ row.thumbnail }}" alt="">{% endif %}
+    <div class="recipe-headings">
+      <h1>{{ recipe.title }}</h1>
+      {% if recipe.summary %}<p class="lead">{{ recipe.summary }}</p>{% endif %}
+      <p class="meta">
+        {% if recipe.servings %}<span>🍽 {{ recipe.servings }} raciones</span>{% endif %}
+        {% if recipe.prep_minutes %}<span>🔪 {{ recipe.prep_minutes }} min prep.</span>{% endif %}
+        {% if recipe.cook_minutes %}<span>🔥 {{ recipe.cook_minutes }} min cocción</span>{% endif %}
+        <span>📊 {{ recipe.difficulty }}</span>
+        {% if row.author %}<a href="{{ row.source_url }}" target="_blank" rel="noopener">@{{ row.author }}</a>{% endif %}
+      </p>
+      {% if recipe.tags %}<p class="tags">{% for t in recipe.tags %}<span class="tag">{{ t }}</span>{% endfor %}</p>{% endif %}
+    </div>
+  </header>
+
+  <div class="actions">
+    <button class="primary big" id="cook-mode">👨‍🍳 Modo cocina</button>
+    <button class="btn" id="copy-shopping">🛒 Copiar lista de la compra</button>
+    {% if recipe.servings %}
+    <span class="servings">
+      Raciones:
+      {% for n in [1, 2, 4, 6, 8] %}
+        <a class="chip {% if n == servings %}active{% endif %}" href="?servings={{ n }}">{{ n }}</a>
+      {% endfor %}
+    </span>
+    {% endif %}
+  </div>
+
+  {% if recipe.warnings %}
+  <details class="card warnings">
+    <summary>⚠️ {{ recipe.warnings|length }} cosa(s) deducidas del vídeo (confianza {{ (recipe.confidence * 100)|round|int }}%)</summary>
+    <ul>{% for w in recipe.warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+
+  <div class="columns">
+    <section class="card ingredients">
+      <h2>Ingredientes</h2>
+      <ul class="checklist">
+        {% for i in recipe.ingredients %}
+        <li>
+          <label>
+            <input type="checkbox" data-check="ing-{{ loop.index }}">
+            <span class="amount">{{ i.display_amount() }}</span>
+            <span class="name">{{ i.name }}{% if i.optional %} <em>(opcional)</em>{% endif %}</span>
+            {% if i.note %}<span class="note">{{ i.note }}</span>{% endif %}
+          </label>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if recipe.equipment %}
+      <h3>Utensilios</h3>
+      <p class="muted">{{ recipe.equipment|join(' · ') }}</p>
+      {% endif %}
+    </section>
+
+    <section class="steps">
+      <h2>Pasos</h2>
+      {% for s in recipe.steps %}
+      <article class="card step" data-step="{{ loop.index0 }}">
+        <label class="step-head">
+          <input type="checkbox" data-check="step-{{ loop.index }}">
+          <span class="step-number">{{ s.number }}</span>
+          <h3>{{ s.title }}</h3>
+        </label>
+        <p class="instruction">{{ s.instruction }}</p>
+        {% if s.ingredients %}<p class="step-ingredients">{% for x in s.ingredients %}<span>{{ x }}</span>{% endfor %}</p>{% endif %}
+        {% if s.tip %}<p class="tip">💡 {{ s.tip }}</p>{% endif %}
+        {% if s.timer_seconds %}<button class="btn timer" data-seconds="{{ s.timer_seconds }}">⏲ Temporizador {{ (s.timer_seconds / 60)|round|int }} min</button>{% endif %}
+      </article>
+      {% endfor %}
+    </section>
+  </div>
+
+  {% if recipe.tips or recipe.storage %}
+  <section class="card">
+    {% if recipe.tips %}<h2>Consejos</h2><ul>{% for t in recipe.tips %}<li>{{ t }}</li>{% endfor %}</ul>{% endif %}
+    {% if recipe.storage %}<h2>Conservación</h2><p>{{ recipe.storage }}</p>{% endif %}
+  </section>
+  {% endif %}
+
+  <footer class="recipe-footer">
+    <a class="btn ghost" href="{{ row.source_url }}" target="_blank" rel="noopener">Ver el vídeo original</a>
+    <form method="post" action="/receta/{{ row.id }}/borrar" onsubmit="return confirm('¿Borrar esta receta?')">
+      <button class="danger ghost" type="submit">Borrar receta</button>
+    </form>
+  </footer>
+
+  <script type="application/json" id="shopping-data">{{ shopping.text | tojson }}</script>
+  <script type="application/json" id="steps-data">{{ steps_json | tojson }}</script>
+</article>
+
+<div id="cook-overlay" hidden>
+  <div class="cook-top">
+    <span id="cook-progress"></span>
+    <button class="btn ghost" id="cook-close">✕ Salir</button>
+  </div>
+  <div class="cook-body">
+    <h2 id="cook-title"></h2>
+    <p id="cook-instruction"></p>
+    <p id="cook-ingredients"></p>
+    <p id="cook-tip"></p>
+    <div id="cook-timer" hidden><span id="cook-timer-value"></span><button class="btn" id="cook-timer-start">Iniciar</button></div>
+  </div>
+  <div class="cook-nav">
+    <button class="btn big" id="cook-prev">← Anterior</button>
+    <button class="primary big" id="cook-next">Siguiente →</button>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

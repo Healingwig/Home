@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Entrar · Recetas{% endblock %}
+{% block content %}
+<div class="card login">
+  <h1>Recetas</h1>
+  <p class="muted">Introduce la contraseña para ver tu recetario.</p>
+  <form method="post" action="/login">
+    <input type="hidden" name="next" value="{{ next }}">
+    <input type="password" name="password" placeholder="Contraseña" autocomplete="current-password" required autofocus>
+    <button type="submit" class="primary">Entrar</button>
+  </form>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+</div>
+{% endblock %}

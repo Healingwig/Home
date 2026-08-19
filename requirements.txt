@@ -1,0 +1,17 @@
+# Núcleo de la API y la web
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+jinja2>=3.1.4
+itsdangerous>=2.2.0
+python-multipart>=0.0.9
+pydantic>=2.8.0
+
+# Descarga del vídeo de Instagram
+yt-dlp>=2024.12.13
+
+# Extracción de la receta
+anthropic>=0.125.0
+
+# Transcripción del audio (opcional: si no está instalado, el pipeline sigue
+# funcionando solo con la descripción del post y los fotogramas)
+faster-whisper>=1.0.3

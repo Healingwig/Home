@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Recetario{% endblock %}
+{% block topbar %}
+<form class="search" method="get" action="/">
+  <input type="search" name="q" value="{{ q }}" placeholder="Buscar receta o ingrediente">
+</form>
+{% endblock %}
+{% block content %}
+<section class="card add-form">
+  <form method="post" action="/nueva">
+    <input type="url" name="url" placeholder="Pega aquí el enlace de un reel de Instagram" required>
+    <button type="submit" class="primary">Convertir en receta</button>
+  </form>
+</section>
+
+{% if not recipes %}
+  <div class="empty">
+    <p>Todavía no hay recetas.</p>
+    <p class="muted">Comparte un reel desde Instagram con el Atajo, o pega el enlace aquí arriba.</p>
+  </div>
+{% else %}
+<div class="grid">
+  {% for r in recipes %}
+  <a class="recipe-card" href="/receta/{{ r.id }}">
+    <div class="thumb">
+      {% if r.thumbnail %}<img src="/media/{{ r.thumbnail }}" alt="" loading="lazy">{% else %}<span>🍽️</span>{% endif %}
+      {% if r.status != 'ready' %}<span class="badge status-{{ r.status }}">{{ {'pending':'En cola','processing':'Procesando','error':'Error'}.get(r.status, r.status) }}</span>{% endif %}
+    </div>
+    <div class="card-body">
+      <h2>{{ r.display_title }}</h2>
+      {% if r.summary %}<p class="muted clamp">{{ r.summary }}</p>{% endif %}
+      <p class="meta">
+        {% if r.total_minutes %}<span>⏱ {{ r.total_minutes }} min</span>{% endif %}
+        {% if r.author %}<span>@{{ r.author }}</span>{% endif %}
+      </p>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
