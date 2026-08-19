@@ -5,6 +5,27 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
+      # 0.0.0.0 para poder entrar desde el iPhone y la tablet de tu red.
       - "8000:8000"
     volumes:
       - ./data:/data
+    extra_hosts:
+      # Permite usar OLLAMA_HOST=http://host.docker.internal:11434 cuando
+      # Ollama corre en el propio ordenador (lo recomendado en Mac).
+      - "host.docker.internal:host-gateway"
+
+  # Ollama dentro de Docker. Solo si NO lo tienes instalado en el sistema:
+  #   docker compose --profile ollama up -d
+  # En Mac es mejor instalar la app de Ollama: dentro de Docker no usa la GPU.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: recetas-ollama
+    profiles: ["ollama"]
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  ollama-models:

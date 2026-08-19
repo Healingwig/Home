@@ -50,10 +50,15 @@ def _run(recipe_id: str, url: str, work_dir: Path) -> Recipe:
     transcript = ""
 
     if source.video_path and media.ffmpeg_available():
-        frames = media.extract_frames(
-            source.video_path, work_dir / "frames", settings.frame_count, settings.frame_max_dim
-        )
-        _save_thumbnail(recipe_id, frames)
+        if settings.frame_count > 0:
+            frames = media.extract_frames(
+                source.video_path, work_dir / "frames", settings.frame_count, settings.frame_max_dim
+            )
+        # Con FRAME_COUNT=0 (modelos locales solo de texto) seguimos sacando un
+        # fotograma: no va al modelo, pero da portada a la receta.
+        _save_thumbnail(recipe_id, frames or media.extract_frames(
+            source.video_path, work_dir / "portada", 1, 640
+        ))
 
         audio = media.extract_audio(source.video_path, work_dir / "audio.wav")
         if audio:

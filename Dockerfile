@@ -12,8 +12,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /srv
 
-COPY requirements.txt .
+COPY requirements.txt requirements-anthropic.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Solo si vas a usar LLM_PROVIDER=anthropic (de pago). Descomenta y reconstruye.
+# RUN pip install --no-cache-dir -r requirements-anthropic.txt
 
 COPY app ./app
 

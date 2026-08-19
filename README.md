@@ -8,14 +8,15 @@ Compartes un reel de cocina desde el iPhone y, un par de minutos después:
   Recordatorios.
 
 No hay que instalar ninguna app en el iPhone: se usa **Atajos**, que ya viene
-con iOS, más un pequeño servidor propio.
+con iOS, más un pequeño servidor que corre **en tu propio ordenador**. No se
+publica nada en Internet y **se puede usar sin pagar nada**.
 
 ```
 Instagram → Compartir → Atajo «Guardar receta»
                             │
                             ▼
-              tu servidor (esta aplicación)
-       yt-dlp → ffmpeg → Whisper → Claude Opus 5
+            tu ordenador (esta aplicación)
+       yt-dlp → ffmpeg → Whisper → modelo (a tu elección)
                             │
               ┌─────────────┴─────────────┐
               ▼                           ▼
@@ -33,23 +34,41 @@ sola:
 3. **Fotogramas del vídeo** — Claude los lee para pillar las cantidades que
    aparecen sobreimpresas en pantalla y que no están en ningún texto.
 
-Con eso, Claude Opus 5 devuelve una receta estructurada (ingredientes con
-cantidad, unidad y sección del supermercado; pasos autocontenidos con tiempos y
+Con eso, el modelo devuelve una receta estructurada (ingredientes con cantidad,
+unidad y sección del supermercado; pasos autocontenidos con tiempos y
 temporizadores) validada contra un esquema fijo. Lo que ha tenido que deducir
 queda anotado en la ficha, así que sabes de qué fiarte.
+
+## Qué modelo usa
+
+Es intercambiable con una variable del `.env`. Las tres opciones dan el mismo
+resultado estructurado; cambian el coste y la calidad de lectura.
+
+| `LLM_PROVIDER` | Coste | Necesita | Bueno para |
+|---|---|---|---|
+| `gemini` *(por defecto)* | **Gratis** (capa gratuita de AI Studio) | Una clave, sin tarjeta | Lo normal: funciona en cualquier equipo |
+| `ollama` | **Gratis** | 8–16 GB de RAM en tu equipo | Que no salga nada de tu casa |
+| `anthropic` | ~0,15 €/receta | Saldo de la API de Claude | La mejor lectura del texto sobreimpreso |
+
+La comparación completa está en
+[docs/despliegue.md](docs/despliegue.md#1-elegir-quién-lee-los-vídeos).
+Todo lo demás (descarga, fotogramas, transcripción con Whisper, la web) es
+software libre que corre en local y no cuesta nada.
 
 ## Puesta en marcha
 
 ```bash
-cp .env.example .env      # rellena ANTHROPIC_API_KEY, API_KEY y APP_PASSWORD
+cp .env.example .env      # GEMINI_API_KEY (gratis), API_KEY y APP_PASSWORD
 docker compose up -d --build
 curl http://localhost:8000/healthz
 ```
 
-Después:
+Después, desde el iPhone y la tablet de tu red, la app está en
+`http://IP-DE-TU-ORDENADOR:8000`. Los dos documentos que quedan:
 
-1. **[docs/despliegue.md](docs/despliegue.md)** — ponerlo en Internet con HTTPS,
-   cookies de Instagram, coste por receta y copias de seguridad.
+1. **[docs/despliegue.md](docs/despliegue.md)** — elegir modelo, entrar desde
+   tus dispositivos (en casa y fuera, con Tailscale), cookies de Instagram y
+   copias de seguridad.
 2. **[docs/atajo-ios.md](docs/atajo-ios.md)** — montar el Atajo paso a paso
    (es lo que hace que todo sea cómodo de usar).
 
@@ -85,7 +104,7 @@ Los parámetros de la lista de la compra están detallados en
 Ejemplo:
 
 ```bash
-curl -X POST https://recetas.tudominio.com/api/recipes \
+curl -X POST http://192.168.1.42:8000/api/recipes \
   -H "X-API-Key: $API_KEY" -H "Content-Type: application/json" \
   -d '{"url": "https://www.instagram.com/reel/XXXX/", "wait": 120}'
 ```
@@ -106,12 +125,14 @@ app/
 ├── shopping.py        construcción de la lista de la compra
 ├── db.py              SQLite
 ├── security.py        clave de API y sesión web
+├── schema_utils.py    adapta el esquema JSON a cada modelo
 ├── cli.py             procesar una URL desde la terminal
 ├── pipeline/
 │   ├── download.py    yt-dlp: vídeo + pie del post
 │   ├── media.py       ffmpeg: fotogramas y audio
 │   ├── transcribe.py  Whisper (opcional)
-│   ├── extract.py     Claude: vídeo → receta estructurada
+│   ├── extract.py     material del vídeo → receta validada
+│   ├── providers/     backends intercambiables (ollama, gemini, anthropic)
 │   └── runner.py      orquestación y estados
 ├── templates/         web (Jinja2)
 └── static/            estilos y modo cocina
@@ -134,6 +155,10 @@ pytest -q
   causa más habitual de que falle una receta.
 - **Uso personal.** Descarga vídeos de terceros para tu propio consumo; no
   publiques las recetas resultantes como si fueran tuyas ni las redistribuyas.
+- **El ordenador tiene que estar encendido** para que el Atajo funcione. Una
+  Raspberry Pi con `LLM_PROVIDER=gemini` da de sobra si quieres dejarlo fijo.
+- **Con la capa gratuita de Gemini**, Google puede usar lo que envías para
+  entrenar sus modelos. Si prefieres que no salga nada de casa, usa `ollama`.
 - **Repasa las cantidades** en recetas de repostería antes de fiarte: si el
   vídeo no las dice, el modelo las estima, y lo avisa en la ficha con la
   confianza y las advertencias.

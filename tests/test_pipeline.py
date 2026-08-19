@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from app.pipeline import download, media
-from app.pipeline.extract import ExtractionInput, build_content
+from app.pipeline.extract import ExtractionInput, build_parts
 
 
 def test_normalize_url_extrae_el_enlace_del_texto_compartido():
@@ -37,21 +37,20 @@ def test_frame_timestamps_soporta_videos_muy_cortos():
     assert media.frame_timestamps(duration=0, count=4) == [0.0]
 
 
-def test_build_content_intercala_etiquetas_e_imagenes(tmp_path: Path):
+def test_build_parts_intercala_etiquetas_e_imagenes(tmp_path: Path):
     frame = tmp_path / "f.jpg"
     frame.write_bytes(b"\xff\xd8\xff\xdb-falso-jpeg")
-    content = build_content(
+    parts = build_parts(
         ExtractionInput(caption="1 huevo", transcript="batimos el huevo", frames=[(1.5, frame)])
     )
-    kinds = [block["type"] for block in content]
-    assert kinds == ["text", "text", "text", "image", "text"]
-    assert "1 huevo" in content[0]["text"]
-    assert "batimos el huevo" in content[0]["text"]
-    assert content[2]["text"].startswith("Fotograma en 1.5s")
-    assert content[3]["source"]["media_type"] == "image/jpeg"
+    assert [kind for kind, _ in parts] == ["text", "text", "text", "image", "text"]
+    assert "1 huevo" in parts[0][1]
+    assert "batimos el huevo" in parts[0][1]
+    assert parts[2][1].startswith("Fotograma 1 de 1, en 1.5s")
+    assert parts[3][1] == frame
 
 
-def test_build_content_sin_material_util_no_llama_al_modelo():
+def test_build_parts_sin_material_util_no_llama_al_modelo():
     from app.pipeline.extract import ExtractionError, extract_recipe
 
     with pytest.raises(ExtractionError):

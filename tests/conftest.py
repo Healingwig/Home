@@ -8,6 +8,8 @@ os.environ.setdefault("DATA_DIR", tempfile.mkdtemp(prefix="recetas-test-"))
 os.environ.setdefault("API_KEY", "clave-de-prueba")
 os.environ.setdefault("APP_PASSWORD", "hola")
 os.environ.setdefault("TRANSCRIBER", "none")
+os.environ.setdefault("LLM_PROVIDER", "gemini")
+os.environ.setdefault("GEMINI_API_KEY", "clave-gemini-de-prueba")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

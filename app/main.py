@@ -27,6 +27,7 @@ from app.config import settings
 from app.models import Recipe
 from app.pipeline import download, process_recipe
 from app.pipeline.media import ffmpeg_available
+from app.pipeline.providers import check_provider
 from app.shopping import shopping_payload
 
 logging.basicConfig(
@@ -50,6 +51,8 @@ async def lifespan(_app: FastAPI):
         logger.warning("API_KEY no configurada. Clave temporal de esta ejecución: %s", settings.api_key)
     if not ffmpeg_available():
         logger.warning("ffmpeg/ffprobe no están en el PATH: sin fotogramas ni transcripción.")
+    ready, detail = check_provider()
+    logger.log(logging.INFO if ready else logging.WARNING, "Modelo (%s): %s", settings.llm_provider, detail)
     # Recetas que se quedaron a medias en un reinicio anterior.
     for stale in db.iter_stale_processing(older_than_seconds=1800):
         db.update_recipe(stale["id"], status="error", error="El proceso se interrumpió. Vuelve a intentarlo.")
@@ -129,7 +132,14 @@ def _load_ready_recipe(recipe_id: str) -> tuple[dict[str, Any], Recipe]:
 
 @app.get("/healthz", include_in_schema=False)
 def healthz() -> dict[str, Any]:
-    return {"ok": True, "ffmpeg": ffmpeg_available()}
+    ready, detail = check_provider()
+    return {
+        "ok": True,
+        "ffmpeg": ffmpeg_available(),
+        "provider": settings.llm_provider,
+        "provider_ready": ready,
+        "provider_detail": detail,
+    }
 
 
 @app.post("/api/recipes", dependencies=[Depends(security.require_api_key)])

@@ -1,139 +1,208 @@
-# Despliegue
+# Puesta en marcha (sin pagar nada)
 
-La app es un contenedor Docker con un volumen para los datos. Necesita estar
-accesible desde tu iPhone (para el Atajo) y desde la tablet, así que lo normal
-es ponerla detrás de un dominio con HTTPS.
+Todo esto corre en tu propio ordenador y no se publica en ningún sitio: solo tú
+lo ves, desde tu red o desde tu VPN privada.
+
+**Lo que cuesta dinero: nada.** Docker, yt-dlp, ffmpeg, Whisper, Tailscale (plan
+personal) y las capas gratuitas de los modelos cubren el uso de una persona.
 
 ---
 
-## 1. Configuración
+## 1. Elegir quién lee los vídeos
+
+Es la única pieza donde hay que decidir algo. Las tres opciones funcionan con el
+mismo código; se cambia con una variable.
+
+| | `gemini` *(por defecto)* | `ollama` | `anthropic` |
+|---|---|---|---|
+| **Coste** | Gratis (capa gratuita) | Gratis | ~0,15 €/receta |
+| **Hardware** | Cualquiera, hasta una Raspberry Pi | 8–16 GB de RAM; ideal con GPU | Cualquiera |
+| **Sale de tu casa** | Sí, a Google | No, nada | Sí, a Anthropic |
+| **Lee el texto del vídeo** | Muy bien | Aceptable | Excelente |
+| **Tiempo por receta** | 20–40 s | 1–5 min (sin GPU, más) | 30–60 s |
+| **Límites** | Cuota diaria generosa para uso personal | Ninguno | Los de tu saldo |
+
+**Recomendación:** empieza con `gemini`. Es gratis, no necesita hardware y la
+calidad es más que suficiente. Si prefieres que no salga nada de casa, pásate a
+`ollama` cambiando una línea del `.env`.
+
+### Opción A — Gemini (gratis, recomendada)
+
+1. Entra en <https://aistudio.google.com/apikey> con tu cuenta de Google.
+2. **Create API key**. No pide tarjeta.
+3. En el `.env`:
+
+```ini
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=AIza...
+```
+
+> Ojo: en la capa gratuita, Google puede usar lo que envías para mejorar sus
+> modelos. Para reels de cocina da igual, pero conviene saberlo. Si te molesta,
+> usa `ollama`.
+
+### Opción B — Ollama (gratis y sin terceros)
+
+**En Mac**, instala la app desde <https://ollama.com/download>. No la metas en
+Docker: dentro del contenedor no usa la GPU de Apple y va muchísimo más lento.
+
+```bash
+ollama pull qwen2.5vl:7b     # ~6 GB, entiende imágenes
+```
+
+**En Linux con Docker:**
+
+```bash
+docker compose --profile ollama up -d
+docker compose exec ollama ollama pull qwen2.5vl:7b
+```
+
+En el `.env`:
+
+```ini
+LLM_PROVIDER=ollama
+OLLAMA_HOST=http://host.docker.internal:11434   # Ollama en el sistema
+# OLLAMA_HOST=http://ollama:11434               # Ollama en el perfil de Docker
+OLLAMA_MODEL=qwen2.5vl:7b
+```
+
+Si tu equipo va justo, usa un modelo de solo texto y renuncia a los fotogramas
+(la mayor parte de la receta sale del pie del post y del audio):
+
+```ini
+OLLAMA_MODEL=llama3.1:8b
+FRAME_COUNT=0
+```
+
+### Opción C — Claude (de pago)
+
+```bash
+pip install -r requirements-anthropic.txt   # o descomenta la línea del Dockerfile
+```
+
+```ini
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+---
+
+## 2. Arrancar
 
 ```bash
 cp .env.example .env
-# genera una clave larga para el Atajo
-python3 -c "import secrets; print('API_KEY=' + secrets.token_urlsafe(32))"
-```
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"   # para API_KEY
+# edita .env: LLM_PROVIDER, la clave del modelo, API_KEY y APP_PASSWORD
 
-Edita `.env` y rellena como mínimo:
-
-- `ANTHROPIC_API_KEY` — de https://console.anthropic.com/
-- `API_KEY` — la que acabas de generar (la usará el Atajo)
-- `APP_PASSWORD` — algo que puedas teclear en la tablet
-
-## 2. Levantarlo
-
-```bash
 docker compose up -d --build
-docker compose logs -f
 ```
 
-Comprueba que responde:
+Comprueba que está todo en su sitio:
 
 ```bash
-curl http://localhost:8000/healthz
-# {"ok":true,"ffmpeg":true}
+curl -s http://localhost:8000/healthz
+# {"ok":true,"ffmpeg":true,"provider":"gemini","provider_ready":true,...}
 ```
 
-## 3. Ponerlo en Internet
+Si `provider_ready` es `false`, el campo `provider_detail` dice exactamente qué
+falta (una clave, un modelo sin descargar, Ollama apagado…).
 
-Necesitas HTTPS: Atajos no manda cabeceras a `http://` fuera de tu red, y no
-quieres tu `API_KEY` viajando en claro.
+---
 
-**Opción A — Cloudflare Tunnel** (sin abrir puertos en el router):
+## 3. Entrar desde el iPhone y la tablet
+
+### En casa (lo normal, y gratis del todo)
+
+Averigua la IP local del ordenador:
 
 ```bash
-cloudflared tunnel --url http://localhost:8000
+ipconfig getifaddr en0        # macOS
+hostname -I | awk '{print $1}' # Linux
 ```
 
-Para algo permanente, crea un túnel con nombre y apúntalo a un subdominio tuyo.
+Esa es tu dirección: `http://192.168.1.42:8000`. Funciona tal cual en el
+navegador de la tablet y en el Atajo del iPhone mientras estéis en la misma
+Wi-Fi. Atajos permite `http://` sin problemas.
 
-**Opción B — Caddy delante** (si ya tienes un servidor con dominio):
+Conviene fijar la IP del ordenador en el router (reserva DHCP) para que no
+cambie y no tengas que retocar el Atajo.
 
+### Fuera de casa (opcional, también gratis)
+
+**Tailscale**, plan personal: gratis hasta 100 dispositivos.
+
+1. Crea la cuenta en <https://tailscale.com> e instala Tailscale en el
+   ordenador, el iPhone y la tablet.
+2. En el ordenador:
+
+```bash
+tailscale serve --bg 8000
+tailscale serve status     # te dice la URL https://tu-equipo.tu-tailnet.ts.net
 ```
-recetas.tudominio.com {
-    reverse_proxy localhost:8000
-}
-```
 
-Caddy pide el certificado de Let's Encrypt solo.
+Esa URL tiene HTTPS de verdad y **solo es visible desde tus dispositivos**: no
+hay nada expuesto a Internet ni puertos abiertos en el router. Úsala en el
+Atajo y funcionará dentro y fuera de casa.
 
-**Opción C — Tailscale**: instala Tailscale en el servidor, el iPhone y la
-tablet, y usa `https://<nombre-maquina>.<tu-tailnet>.ts.net` con
-`tailscale serve`. Es la opción más privada: nada queda expuesto a Internet.
+> El ordenador tiene que estar encendido para que el Atajo funcione. Si quieres
+> que esté siempre disponible, una Raspberry Pi 4/5 con `LLM_PROVIDER=gemini`
+> sirve de sobra (con `ollama` no: le falta músculo).
 
 ---
 
 ## 4. Cookies de Instagram
 
-Muchos reels (y prácticamente todos si el servidor está en un centro de datos)
-piden sesión iniciada. Sin cookies verás el error *«Instagram pide iniciar
-sesión para este post»*.
+Muchos reels piden sesión iniciada. Sin cookies verás el error *«Instagram pide
+iniciar sesión para este post»*.
+
+Corriendo desde tu casa fallará bastante menos que desde un servidor alquilado,
+pero acabará pasando:
 
 1. En un navegador de escritorio, inicia sesión en instagram.com **con una
-   cuenta secundaria** — Instagram puede bloquear cuentas cuyas cookies se usan
-   desde IPs raras.
+   cuenta secundaria**.
 2. Instala una extensión que exporte cookies en formato Netscape
    («Get cookies.txt LOCALLY» o similar) y exporta las de `instagram.com`.
-3. Copia el fichero al volumen de datos y apunta ahí la variable:
+3. Copia el fichero a `./data/` y en el `.env`:
 
-```bash
-cp cookies_instagram.txt ./data/
-# en .env
+```ini
 IG_COOKIES_FILE=/data/cookies_instagram.txt
 ```
 
 4. `docker compose restart`.
 
-Las cookies caducan cada pocas semanas o meses; cuando empiecen a fallar las
-descargas, repite la exportación.
+Las cookies caducan cada pocas semanas; cuando empiecen a fallar las descargas,
+repite la exportación.
 
 ---
 
 ## 5. Transcripción del audio
 
-Por defecto se usa `faster-whisper` con el modelo `small` en CPU. Al primer
-vídeo se descarga el modelo (~500 MB) dentro del volumen `/data/modelos`, así
-que ese primer procesado tarda más.
+Whisper corre en local y es gratis. Al primer vídeo se descarga el modelo
+(~500 MB) dentro de `./data/modelos`, así que ese primer procesado tarda más.
 
-- Servidor con poca RAM (menos de 2 GB): pon `WHISPER_MODEL=base` o
-  `TRANSCRIBER=none`.
-- Servidor holgado: `WHISPER_MODEL=medium` mejora bastante con recetas
-  habladas rápido.
+- Equipo justo de RAM: `WHISPER_MODEL=base`, o `TRANSCRIBER=none`.
+- Equipo holgado: `WHISPER_MODEL=medium` va mejor con recetas habladas rápido.
 
-Sin transcripción la app sigue funcionando: se apoya en el pie del post y en
-los fotogramas, que es de donde sale la mayor parte de la información.
+Sin transcripción la app sigue funcionando con el pie del post y los fotogramas.
 
 ---
 
-## 6. Coste aproximado
+## 6. Copias de seguridad
 
-Por receta se envían unos 14 fotogramas más el texto: en torno a 20.000 tokens
-de entrada y 2.000 de salida con Claude Opus 5, es decir **unos 0,15 € por
-receta**. Si procesas muchas y quieres bajarlo:
-
-- `FRAME_COUNT=8` y `FRAME_MAX_DIM=768` (aproximadamente la mitad de coste).
-- `CLAUDE_EFFORT=medium`.
-- `CLAUDE_MODEL=claude-sonnet-5` si prefieres un modelo más barato; la calidad
-  de lectura del texto sobreimpreso en los vídeos baja un poco.
-
----
-
-## 7. Copias de seguridad
-
-Todo vive en el volumen `./data`:
+Todo vive en `./data`:
 
 ```
 data/
-├── recetas.sqlite3     # recetas e ingredientes
+├── recetas.sqlite3     # tus recetas
 ├── media/              # miniaturas
-└── modelos/            # modelo de Whisper (regenerable)
+└── modelos/            # Whisper (se vuelve a descargar solo)
 ```
 
-Basta con copiar `recetas.sqlite3` y `media/`.
+Con copiar `recetas.sqlite3` y `media/` de vez en cuando basta.
 
 ---
 
-## Ejecutar sin Docker
+## Sin Docker
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate

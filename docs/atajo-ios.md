@@ -10,14 +10,17 @@ No hace falta instalar ninguna app: se hace con **Atajos** (viene con iOS).
 
 ## Antes de empezar
 
-Necesitas dos datos del servidor que has desplegado (ver [despliegue.md](despliegue.md)):
+Necesitas dos datos del servidor que tienes corriendo en casa (ver
+[despliegue.md](despliegue.md)):
 
 | Dato | Ejemplo |
 |---|---|
-| Dirección de tu API | `https://recetas.tudominio.com` |
+| Dirección de tu app | `http://192.168.1.42:8000` (tu red) o `https://mac.tu-tailnet.ts.net` (Tailscale) |
 | Tu `API_KEY` | `k7Fh2...` (la que pusiste en el `.env`) |
 
-En lo que sigue los llamo `TU-DOMINIO` y `TU-CLAVE`.
+En lo que sigue los llamo `TU-DIRECCION` y `TU-CLAVE`. Si usas la IP local, el
+Atajo solo funcionará estando en tu Wi-Fi; con Tailscale funciona en cualquier
+sitio. `http://` sin cifrar es válido en Atajos dentro de tu propia red.
 
 ---
 
@@ -40,7 +43,7 @@ En lo que sigue los llamo `TU-DOMINIO` y `TU-CLAVE`.
 - Como entrada, elige la variable mágica **Entrada del atajo**.
 
 **2. Obtener contenido de la URL** *(crear la receta)*
-- URL: `https://TU-DOMINIO/api/recipes`
+- URL: `TU-DIRECCION/api/recipes`
 - Despliega la flecha ▸ para ver las opciones:
   - **Método**: `POST`
   - **Encabezados**: añade uno → clave `X-API-Key`, valor `TU-CLAVE`
@@ -52,12 +55,15 @@ En lo que sigue los llamo `TU-DOMINIO` y `TU-CLAVE`.
 - Obtener el valor de `id` en **Contenido de la URL**.
 - Renombra la variable (mantén pulsado → *Renombrar*) a `IdReceta`.
 
-**4. Repetir 40 veces** *(esperar a que la receta esté lista)*
+**4. Repetir 60 veces** *(esperar a que la receta esté lista)*
+
+> Son 60 vueltas × 5 s ≈ 5 minutos de margen. Con Gemini o Claude sobra de
+> largo; si usas un modelo local en un equipo sin GPU, sube a `150`.
 
 Dentro del bucle:
 
   **4.1. Obtener contenido de la URL**
-  - URL: `https://TU-DOMINIO/api/recipes/` + variable `IdReceta`
+  - URL: `TU-DIRECCION/api/recipes/` + variable `IdReceta`
     (escribe la primera parte y arrastra la variable justo al final)
   - Método `GET`, encabezado `X-API-Key` = `TU-CLAVE`.
 
@@ -68,7 +74,7 @@ Dentro del bucle:
   Dentro del *Si* (todo lo que sigue va aquí dentro):
 
   - **Obtener contenido de la URL**
-    `https://TU-DOMINIO/api/recipes/[IdReceta]/shopping-list?format=text`
+    `TU-DIRECCION/api/recipes/[IdReceta]/shopping-list?format=text`
     · Método `GET` · encabezado `X-API-Key` = `TU-CLAVE`
   - **Dividir texto** → por **Líneas** (entrada: el contenido anterior)
   - **Repetir con cada elemento** (entrada: **Texto dividido**)
@@ -86,7 +92,7 @@ Dentro del bucle:
   Fin del *Si*. Fin del *Repetir*.
 
 **5. Mostrar notificación** (fuera del bucle)
-- `La receta está tardando más de lo normal. Ábrela en TU-DOMINIO dentro de un rato.`
+- `La receta está tardando más de lo normal. Ábrela en TU-DIRECCION dentro de un rato.`
 
 ### Probarlo
 
@@ -119,7 +125,7 @@ Todos son parámetros que puedes añadir a la URL del paso 4.3:
 
 Para cuando quieres cocinar algo que guardaste hace semanas.
 
-1. **Obtener contenido de la URL** → `https://TU-DOMINIO/api/recipes?limit=50`
+1. **Obtener contenido de la URL** → `TU-DIRECCION/api/recipes?limit=50`
    con el encabezado `X-API-Key`.
 2. **Obtener valor de diccionario** → `recipes`.
 3. **Elegir de la lista** (entrada: lo anterior). En los ajustes de la acción,
@@ -127,7 +133,7 @@ Para cuando quieres cocinar algo que guardaste hace semanas.
 4. **Obtener valor de diccionario** → `id` en el elemento elegido.
 5. **Pedir entrada** → Número → `¿Para cuántas raciones?`
 6. **Obtener contenido de la URL** →
-   `https://TU-DOMINIO/api/recipes/[id]/shopping-list?format=text&servings=[Entrada]`
+   `TU-DIRECCION/api/recipes/[id]/shopping-list?format=text&servings=[Entrada]`
 7. **Dividir texto** por líneas → **Repetir con cada elemento** → **Añadir nuevo recordatorio**.
 
 ---
@@ -147,7 +153,7 @@ El resto del atajo no cambia: la API siempre te da una línea de texto por produ
 
 ## La tablet
 
-En la tablet, abre `https://TU-DOMINIO`, introduce tu `APP_PASSWORD` una vez y
+En la tablet, abre `TU-DIRECCION` en Safari, introduce tu `APP_PASSWORD` una vez y
 después **Compartir → Añadir a pantalla de inicio**. Queda como una app: sin
 barra de navegador y a pantalla completa.
 

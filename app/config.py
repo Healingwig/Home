@@ -47,7 +47,16 @@ class Settings:
     app_password: str
     session_secret: str
 
-    model: str
+    llm_provider: str  # "ollama" | "gemini" | "anthropic"
+
+    ollama_host: str
+    ollama_model: str
+    ollama_timeout: int
+
+    gemini_api_key: str
+    gemini_model: str
+
+    anthropic_model: str
     max_tokens: int
     effort: str
     refusal_fallback: bool
@@ -90,7 +99,13 @@ class Settings:
             api_key=api_key,
             app_password=os.getenv("APP_PASSWORD", "").strip() or api_key,
             session_secret=os.getenv("SESSION_SECRET", "").strip() or api_key,
-            model=os.getenv("CLAUDE_MODEL", "claude-opus-5"),
+            llm_provider=os.getenv("LLM_PROVIDER", "gemini").strip().lower(),
+            ollama_host=os.getenv("OLLAMA_HOST", "http://localhost:11434").rstrip("/"),
+            ollama_model=os.getenv("OLLAMA_MODEL", "qwen2.5vl:7b"),
+            ollama_timeout=_env_int("OLLAMA_TIMEOUT", 900),
+            gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            anthropic_model=os.getenv("CLAUDE_MODEL", "claude-opus-5"),
             max_tokens=_env_int("CLAUDE_MAX_TOKENS", 16000),
             effort=os.getenv("CLAUDE_EFFORT", "high"),
             refusal_fallback=_env_bool("CLAUDE_REFUSAL_FALLBACK", True),

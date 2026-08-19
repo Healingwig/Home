@@ -1,22 +1,22 @@
-"""Convierte el material del vídeo en una receta estructurada con Claude."""
+"""Convierte el material del vídeo en una receta estructurada.
+
+El modelo que hace el trabajo se elige con `LLM_PROVIDER`; aquí solo se prepara
+el material y se valida lo que devuelve.
+"""
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
-
-import anthropic
 
 from app.config import settings
-from app.models import RECIPE_JSON_SCHEMA, Recipe
+from app.models import Recipe
+from app.pipeline.providers import Part, Provider, ProviderError, get_provider
 
 logger = logging.getLogger(__name__)
-
-REFUSAL_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 SYSTEM_PROMPT = f"""Eres un chef que transcribe recetas de vídeos cortos de redes sociales \
 (reels de Instagram, TikTok) a fichas de cocina claras y ejecutables.
@@ -37,6 +37,8 @@ Reglas:
 - `servings`: si el vídeo no lo dice, estima a partir de las cantidades y anótalo en `warnings`.
 - `confidence`: 0.9+ si el pie de foto trae la receta completa; 0.5-0.7 si has tenido que reconstruirla de los fotogramas; menos de 0.4 si el vídeo apenas es una receta.
 
+Responde únicamente con el objeto JSON de la receta, sin texto alrededor ni bloques de código.
+
 Si el material no corresponde a una receta de cocina, devuelve igualmente el JSON con \
 `title` describiendo lo que hay, `confidence` cercano a 0 y una advertencia explicándolo."""
 
@@ -53,14 +55,6 @@ class ExtractionInput:
 
 class ExtractionError(RuntimeError):
     pass
-
-
-def _image_block(path: Path) -> dict[str, Any]:
-    data = base64.standard_b64encode(path.read_bytes()).decode("ascii")
-    return {
-        "type": "image",
-        "source": {"type": "base64", "media_type": "image/jpeg", "data": data},
-    }
 
 
 def _context_text(payload: ExtractionInput) -> str:
@@ -83,81 +77,63 @@ def _context_text(payload: ExtractionInput) -> str:
     return "\n".join(lines)
 
 
-def build_content(payload: ExtractionInput) -> list[dict[str, Any]]:
-    content: list[dict[str, Any]] = [{"type": "text", "text": _context_text(payload)}]
+def build_parts(payload: ExtractionInput) -> list[Part]:
+    """Material del vídeo en fragmentos que cada backend traduce a su formato."""
+    parts: list[Part] = [("text", _context_text(payload))]
     if payload.frames:
-        content.append(
-            {"type": "text", "text": f"\nFotogramas del vídeo ({len(payload.frames)}), en orden cronológico:"}
+        parts.append(
+            ("text", f"\nFotogramas del vídeo ({len(payload.frames)}), en orden cronológico:")
         )
-        for timestamp, path in payload.frames:
-            content.append({"type": "text", "text": f"Fotograma en {timestamp:.1f}s:"})
-            content.append(_image_block(path))
-    content.append(
-        {
-            "type": "text",
-            "text": (
-                "\nDevuelve la receta completa siguiendo el esquema. Repasa los fotogramas en busca de "
-                "cantidades sobreimpresas antes de dar por perdida una cantidad."
-            ),
-        }
+        for index, (timestamp, path) in enumerate(payload.frames, start=1):
+            parts.append(("text", f"Fotograma {index} de {len(payload.frames)}, en {timestamp:.1f}s:"))
+            parts.append(("image", path))
+    parts.append(
+        (
+            "text",
+            "\nDevuelve la receta completa siguiendo el esquema. Repasa los fotogramas en busca de "
+            "cantidades sobreimpresas antes de dar por perdida una cantidad.",
+        )
     )
-    return content
+    return parts
 
 
-def _request_kwargs(content: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "model": settings.model,
-        "max_tokens": settings.max_tokens,
-        "system": SYSTEM_PROMPT,
-        "thinking": {"type": "adaptive"},
-        "output_config": {
-            "effort": settings.effort,
-            "format": {"type": "json_schema", "schema": RECIPE_JSON_SCHEMA},
-        },
-        "messages": [{"role": "user", "content": content}],
-    }
-
-
-def _call_claude(client: anthropic.Anthropic, content: list[dict[str, Any]]):
-    kwargs = _request_kwargs(content)
-    if settings.refusal_fallback:
-        try:
-            # `fallbacks: "default"` enruta a otro modelo si un clasificador
-            # rechaza la petición, en lugar de devolvernos un error.
-            return client.beta.messages.create(
-                betas=[REFUSAL_FALLBACK_BETA], fallbacks="default", **kwargs
-            )
-        except anthropic.BadRequestError as exc:
-            logger.warning("Fallback de rechazo no disponible (%s); reintento sin él.", exc)
-    return client.messages.create(**kwargs)
-
-
-def _response_text(response) -> str:
-    for block in response.content:
-        if block.type == "text" and block.text.strip():
-            return block.text
-    raise ExtractionError("Claude no devolvió ningún bloque de texto con la receta.")
-
-
-def extract_recipe(payload: ExtractionInput, client: anthropic.Anthropic | None = None) -> Recipe:
-    if not payload.caption.strip() and not payload.transcript.strip() and not payload.frames:
-        raise ExtractionError("No hay material suficiente (ni texto, ni audio, ni imágenes).")
-
-    client = client or anthropic.Anthropic()
-    response = _call_claude(client, build_content(payload))
-
-    if getattr(response, "stop_reason", None) == "refusal":
-        details = getattr(response, "stop_details", None)
-        reason = getattr(details, "explanation", None) or "sin detalle"
-        raise ExtractionError(f"El modelo rechazó procesar este vídeo ({reason}).")
-
-    raw = _response_text(response)
+def parse_recipe(raw: str) -> Recipe:
+    """Valida la respuesta del modelo, tolerando envoltorios de los modelos locales."""
     try:
-        data = json.loads(raw)
+        data = json.loads(_strip_wrapper(raw))
     except json.JSONDecodeError as exc:
         raise ExtractionError(f"La respuesta del modelo no era JSON válido: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise ExtractionError("El modelo devolvió un JSON que no es un objeto de receta.")
 
     try:
         return Recipe.model_validate(data)
     except Exception as exc:
         raise ExtractionError(f"La receta no encaja con el esquema esperado: {exc}") from exc
+
+
+def _strip_wrapper(raw: str) -> str:
+    """Los modelos locales suelen envolver el JSON en ```json … ```."""
+    text = raw.strip()
+    fenced = re.search(r"```(?:json)?\s*(.+?)```", text, re.S)
+    if fenced:
+        return fenced.group(1).strip()
+    if not text.startswith("{"):
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            return text[start : end + 1]
+    return text
+
+
+def extract_recipe(payload: ExtractionInput, provider: Provider | None = None) -> Recipe:
+    if not payload.caption.strip() and not payload.transcript.strip() and not payload.frames:
+        raise ExtractionError("No hay material suficiente (ni texto, ni audio, ni imágenes).")
+
+    try:
+        backend = provider or get_provider()
+        raw = backend.generate(SYSTEM_PROMPT, build_parts(payload))
+    except ProviderError as exc:
+        raise ExtractionError(str(exc)) from exc
+
+    return parse_recipe(raw)
