@@ -5,6 +5,7 @@ import os
 import tempfile
 
 os.environ.setdefault("DATA_DIR", tempfile.mkdtemp(prefix="recetas-test-"))
+os.environ.setdefault("STORAGE_BACKEND", "local")
 os.environ.setdefault("API_KEY", "clave-de-prueba")
 os.environ.setdefault("APP_PASSWORD", "hola")
 os.environ.setdefault("TRANSCRIBER", "none")
@@ -14,8 +15,16 @@ os.environ.setdefault("GEMINI_API_KEY", "clave-gemini-de-prueba")
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import db, main  # noqa: E402
+from app import main, storage  # noqa: E402
 from app.models import Ingredient, Recipe, Step  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def almacen_limpio(tmp_path, monkeypatch):
+    """Cada prueba parte de un almacén vacío en su propio directorio."""
+    monkeypatch.setattr(storage, "_store", storage.LocalObjectStore(tmp_path / "almacen"))
+    yield
+    storage.reset_store()
 
 
 @pytest.fixture
@@ -56,9 +65,8 @@ def sample_recipe() -> Recipe:
 
 @pytest.fixture
 def stored_recipe(sample_recipe):
-    db.init_db()
-    recipe_id = db.create_recipe("https://www.instagram.com/reel/ABC123/")
-    db.update_recipe(
+    recipe_id = storage.create_recipe("https://www.instagram.com/reel/ABC123/")
+    storage.update_recipe(
         recipe_id,
         status="ready",
         title=sample_recipe.title,

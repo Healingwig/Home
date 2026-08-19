@@ -1,219 +1,222 @@
-# Puesta en marcha (sin pagar nada)
+# Despliegue en Google Cloud Run (sin ordenador y gratis)
 
-Todo esto corre en tu propio ordenador y no se publica en ningún sitio: solo tú
-lo ves, desde tu red o desde tu VPN privada.
+La app vive entera en la nube: se enciende cuando compartes un reel y se apaga
+sola. No hace falta tener ningún ordenador encendido, ni router, ni VPN. Te da
+una URL con HTTPS que funciona desde cualquier sitio.
 
-**Lo que cuesta dinero: nada.** Docker, yt-dlp, ffmpeg, Whisper, Tailscale (plan
-personal) y las capas gratuitas de los modelos cubren el uso de una persona.
+**Qué se usa y por qué entra en la capa gratuita:**
+
+| Servicio | Capa gratuita mensual | Lo que gastarás |
+|---|---|---|
+| Cloud Run | 180.000 s de CPU, 2 M peticiones | ~60 s de CPU por receta |
+| Cloud Storage | 5 GB, 5.000 escrituras, 50.000 lecturas | unos KB por receta |
+| Gemini (AI Studio) | Cuota diaria de peticiones | 1 petición por receta |
+
+Con 30 recetas al mes usarías alrededor del 1 % de lo gratuito.
+
+> **Hay que dar una tarjeta.** Google Cloud exige una forma de pago para
+> activar la cuenta, aunque no cobre nada dentro de la capa gratuita. Si
+> prefieres no darla, al final de este documento tienes la alternativa.
 
 ---
 
-## 1. Elegir quién lee los vídeos
+## 1. Preparativos (10 minutos, una vez)
 
-Es la única pieza donde hay que decidir algo. Las tres opciones funcionan con el
-mismo código; se cambia con una variable.
+### Clave de Gemini
 
-| | `gemini` *(por defecto)* | `ollama` | `anthropic` |
-|---|---|---|---|
-| **Coste** | Gratis (capa gratuita) | Gratis | ~0,15 €/receta |
-| **Hardware** | Cualquiera, hasta una Raspberry Pi | 8–16 GB de RAM; ideal con GPU | Cualquiera |
-| **Sale de tu casa** | Sí, a Google | No, nada | Sí, a Anthropic |
-| **Lee el texto del vídeo** | Muy bien | Aceptable | Excelente |
-| **Tiempo por receta** | 20–40 s | 1–5 min (sin GPU, más) | 30–60 s |
-| **Límites** | Cuota diaria generosa para uso personal | Ninguno | Los de tu saldo |
+En <https://aistudio.google.com/apikey> → **Create API key**. Es gratis y no
+pide tarjeta. Guárdala.
 
-**Recomendación:** empieza con `gemini`. Es gratis, no necesita hardware y la
-calidad es más que suficiente. Si prefieres que no salga nada de casa, pásate a
-`ollama` cambiando una línea del `.env`.
+### Proyecto de Google Cloud
 
-### Opción A — Gemini (gratis, recomendada)
-
-1. Entra en <https://aistudio.google.com/apikey> con tu cuenta de Google.
-2. **Create API key**. No pide tarjeta.
-3. En el `.env`:
-
-```ini
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=AIza...
-```
-
-> Ojo: en la capa gratuita, Google puede usar lo que envías para mejorar sus
-> modelos. Para reels de cocina da igual, pero conviene saberlo. Si te molesta,
-> usa `ollama`.
-
-### Opción B — Ollama (gratis y sin terceros)
-
-**En Mac**, instala la app desde <https://ollama.com/download>. No la metas en
-Docker: dentro del contenedor no usa la GPU de Apple y va muchísimo más lento.
+1. Instala `gcloud`: <https://cloud.google.com/sdk/docs/install>
+2. Entra y crea el proyecto:
 
 ```bash
-ollama pull qwen2.5vl:7b     # ~6 GB, entiende imágenes
+gcloud auth login
+gcloud projects create recetas-$USER --name="Recetas"
+gcloud config set project recetas-$USER
 ```
 
-**En Linux con Docker:**
+3. Asocia una cuenta de facturación (en la consola web, *Facturación*) y activa
+   los servicios:
 
 ```bash
-docker compose --profile ollama up -d
-docker compose exec ollama ollama pull qwen2.5vl:7b
+gcloud services enable run.googleapis.com storage.googleapis.com \
+    artifactregistry.googleapis.com cloudbuild.googleapis.com
 ```
 
-En el `.env`:
-
-```ini
-LLM_PROVIDER=ollama
-OLLAMA_HOST=http://host.docker.internal:11434   # Ollama en el sistema
-# OLLAMA_HOST=http://ollama:11434               # Ollama en el perfil de Docker
-OLLAMA_MODEL=qwen2.5vl:7b
-```
-
-Si tu equipo va justo, usa un modelo de solo texto y renuncia a los fotogramas
-(la mayor parte de la receta sale del pie del post y del audio):
-
-```ini
-OLLAMA_MODEL=llama3.1:8b
-FRAME_COUNT=0
-```
-
-### Opción C — Claude (de pago)
+### Cubo para las recetas
 
 ```bash
-pip install -r requirements-anthropic.txt   # o descomenta la línea del Dockerfile
-```
-
-```ini
-LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-...
+# us-central1 es una de las regiones con almacenamiento en la capa gratuita.
+gcloud storage buckets create gs://recetas-$USER --location=us-central1 \
+    --uniform-bucket-level-access
 ```
 
 ---
 
-## 2. Arrancar
+## 2. Desplegar
 
 ```bash
-cp .env.example .env
-python3 -c "import secrets; print(secrets.token_urlsafe(32))"   # para API_KEY
-# edita .env: LLM_PROVIDER, la clave del modelo, API_KEY y APP_PASSWORD
+API_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+echo "Guarda esta clave, la necesita el Atajo: $API_KEY"
 
-docker compose up -d --build
+gcloud run deploy recetas \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --memory 1Gi \
+  --cpu 1 \
+  --timeout 300 \
+  --max-instances 2 \
+  --set-env-vars "LLM_PROVIDER=gemini,STORAGE_BACKEND=gcs,GCS_BUCKET=recetas-$USER,DATA_DIR=/tmp/recetas" \
+  --set-env-vars "GEMINI_API_KEY=TU-CLAVE-DE-GEMINI,API_KEY=$API_KEY,APP_PASSWORD=una-contraseña-corta"
 ```
 
-Comprueba que está todo en su sitio:
+Tarda unos minutos la primera vez (construye la imagen). Al terminar te imprime
+la URL: `https://recetas-xxxxx-uc.a.run.app`. **Esa es `TU-DIRECCION`.**
+
+Comprueba que está todo:
 
 ```bash
-curl -s http://localhost:8000/healthz
+curl -s https://TU-DIRECCION/healthz
 # {"ok":true,"ffmpeg":true,"provider":"gemini","provider_ready":true,...}
 ```
 
-Si `provider_ready` es `false`, el campo `provider_detail` dice exactamente qué
-falta (una clave, un modelo sin descargar, Ollama apagado…).
+`--allow-unauthenticated` deja la URL accesible desde Internet, pero la app pide
+tu `API_KEY` o tu contraseña en todas las rutas: sin ellas solo se ve la
+pantalla de login.
+
+> **Por qué `--timeout 300`:** en Cloud Run el contenedor se congela en cuanto
+> responde, así que el trabajo se hace *durante* la petición del Atajo. Ese
+> tiempo tiene que caber en el timeout.
 
 ---
 
-## 3. Entrar desde el iPhone y la tablet
+## 3. Cookies de Instagram
 
-### En casa (lo normal, y gratis del todo)
+Es lo que más se rompe. Desde un centro de datos, Instagram pide sesión
+iniciada para casi todos los reels; sin cookies verás *«Instagram pide iniciar
+sesión para este post»*.
 
-Averigua la IP local del ordenador:
+1. En el navegador, inicia sesión en instagram.com **con una cuenta
+   secundaria** — Instagram bloquea cuentas cuyas cookies se usan desde IPs
+   raras, y no quieres que sea la tuya de verdad.
+2. Instala una extensión que exporte cookies en formato Netscape («Get
+   cookies.txt LOCALLY» o similar) y exporta las de `instagram.com`.
+3. Súbelas como variable de entorno:
 
 ```bash
-ipconfig getifaddr en0        # macOS
-hostname -I | awk '{print $1}' # Linux
+gcloud run services update recetas --region us-central1 \
+  --set-env-vars "IG_COOKIES_B64=$(base64 -w0 cookies.txt)"   # macOS: base64 -i cookies.txt
 ```
 
-Esa es tu dirección: `http://192.168.1.42:8000`. Funciona tal cual en el
-navegador de la tablet y en el Atajo del iPhone mientras estéis en la misma
-Wi-Fi. Atajos permite `http://` sin problemas.
+Caducan cada pocas semanas. Cuando empiecen a fallar las descargas, repite el
+paso 3 con cookies nuevas.
 
-Conviene fijar la IP del ordenador en el router (reserva DHCP) para que no
-cambie y no tengas que retocar el Atajo.
+---
 
-### Fuera de casa (opcional, también gratis)
+## 4. Actualizar y vigilar
 
-**Tailscale**, plan personal: gratis hasta 100 dispositivos.
+```bash
+gcloud run deploy recetas --source . --region us-central1   # redesplegar
+gcloud run services logs tail recetas --region us-central1  # ver qué pasa
+gcloud billing accounts list                                 # comprobar gasto
+```
 
-1. Crea la cuenta en <https://tailscale.com> e instala Tailscale en el
-   ordenador, el iPhone y la tablet.
-2. En el ordenador:
+Para dormir tranquilo, ponte un **presupuesto con alerta de 1 €** en
+*Facturación → Presupuestos y alertas*. Con este uso no debería saltar nunca.
+
+### Copias de seguridad
+
+Todo está en el cubo:
+
+```bash
+gcloud storage rsync -r gs://recetas-$USER/recetario ./copia-recetas
+```
+
+---
+
+## 5. Cuánto tarda cada receta
+
+| Paso | Tiempo |
+|---|---|
+| Arranque en frío del contenedor | 5–15 s (solo si llevaba rato parado) |
+| Descarga del reel | 3–10 s |
+| Recompresión del vídeo | 5–15 s |
+| Gemini lee el vídeo y escribe la receta | 20–40 s |
+
+En total, entre 30 s y 1,5 min. El Atajo mantiene una sola petición abierta
+durante ese rato, así que no tienes que hacer nada.
+
+---
+
+## Cómo lee el vídeo
+
+Con Gemini se le manda **el vídeo entero**, recomprimido para que quepa en una
+petición: ve las imágenes (incluido el texto sobreimpreso con las cantidades) y
+escucha el audio en la misma pasada. Por eso el despliegue en la nube no
+necesita Whisper ni extraer fotogramas.
+
+Si el vídeo no cabe ni recomprimido, la app cae sola al modo antiguo:
+fotogramas sueltos con ffmpeg. Los modelos que no aceptan vídeo (`ollama`,
+`anthropic`) usan siempre ese modo.
+
+---
+
+## Alternativa sin tarjeta: en tu propio equipo
+
+Si prefieres no dar una tarjeta a Google, todo esto sigue funcionando en un
+ordenador tuyo —— con la contrapartida de que **tiene que estar encendido**
+cuando compartas un reel.
+
+```bash
+cp .env.example .env      # STORAGE_BACKEND=local, GEMINI_API_KEY, API_KEY
+docker compose up -d --build
+```
+
+Entras desde el iPhone y la tablet con `http://IP-DE-TU-EQUIPO:8000` estando en
+la misma Wi-Fi. Para que funcione también fuera de casa, **Tailscale** (plan
+personal gratuito, sin tarjeta) da una URL con HTTPS visible solo desde tus
+dispositivos:
 
 ```bash
 tailscale serve --bg 8000
-tailscale serve status     # te dice la URL https://tu-equipo.tu-tailnet.ts.net
+tailscale serve status
 ```
 
-Esa URL tiene HTTPS de verdad y **solo es visible desde tus dispositivos**: no
-hay nada expuesto a Internet ni puertos abiertos en el router. Úsala en el
-Atajo y funcionará dentro y fuera de casa.
+Una Raspberry Pi con `LLM_PROVIDER=gemini` sirve de sobra para dejarlo fijo.
 
-> El ordenador tiene que estar encendido para que el Atajo funcione. Si quieres
-> que esté siempre disponible, una Raspberry Pi 4/5 con `LLM_PROVIDER=gemini`
-> sirve de sobra (con `ollama` no: le falta músculo).
+### Modelo local, sin depender de nadie
 
----
+Si además quieres que el vídeo no salga de casa, instala
+[Ollama](https://ollama.com/download), descarga un modelo con visión y cambia
+dos variables:
 
-## 4. Cookies de Instagram
-
-Muchos reels piden sesión iniciada. Sin cookies verás el error *«Instagram pide
-iniciar sesión para este post»*.
-
-Corriendo desde tu casa fallará bastante menos que desde un servidor alquilado,
-pero acabará pasando:
-
-1. En un navegador de escritorio, inicia sesión en instagram.com **con una
-   cuenta secundaria**.
-2. Instala una extensión que exporte cookies en formato Netscape
-   («Get cookies.txt LOCALLY» o similar) y exporta las de `instagram.com`.
-3. Copia el fichero a `./data/` y en el `.env`:
+```bash
+ollama pull qwen2.5vl:7b
+```
 
 ```ini
-IG_COOKIES_FILE=/data/cookies_instagram.txt
+LLM_PROVIDER=ollama
+OLLAMA_HOST=http://host.docker.internal:11434
+OLLAMA_MODEL=qwen2.5vl:7b
 ```
 
-4. `docker compose restart`.
-
-Las cookies caducan cada pocas semanas; cuando empiecen a fallar las descargas,
-repite la exportación.
+Necesita 8–16 GB de RAM, tarda entre 1 y 5 minutos por receta y lee peor el
+texto sobreimpreso. Para transcribir el audio (Ollama no lo hace):
+`pip install -r requirements-whisper.txt`.
 
 ---
 
-## 5. Transcripción del audio
-
-Whisper corre en local y es gratis. Al primer vídeo se descarga el modelo
-(~500 MB) dentro de `./data/modelos`, así que ese primer procesado tarda más.
-
-- Equipo justo de RAM: `WHISPER_MODEL=base`, o `TRANSCRIBER=none`.
-- Equipo holgado: `WHISPER_MODEL=medium` va mejor con recetas habladas rápido.
-
-Sin transcripción la app sigue funcionando con el pie del post y los fotogramas.
-
----
-
-## 6. Copias de seguridad
-
-Todo vive en `./data`:
-
-```
-data/
-├── recetas.sqlite3     # tus recetas
-├── media/              # miniaturas
-└── modelos/            # Whisper (se vuelve a descargar solo)
-```
-
-Con copiar `recetas.sqlite3` y `media/` de vez en cuando basta.
-
----
-
-## Sin Docker
+## Desarrollo
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt      # necesita ffmpeg en el PATH
-export $(grep -v '^#' .env | xargs)
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
+pip install -r requirements-dev.txt
+pytest -q
 
-Procesar una URL suelta desde la terminal, sin servidor:
-
-```bash
+STORAGE_BACKEND=local uvicorn app.main:app --reload
 python -m app.cli "https://www.instagram.com/reel/XXXXXX/"
-python -m app.cli "https://www.instagram.com/reel/XXXXXX/" --json --raciones 4
 ```

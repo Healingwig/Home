@@ -43,6 +43,12 @@ def _env_int(name: str, default: int) -> int:
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
+
+    serverless: bool
+    storage_backend: str  # "local" | "gcs"
+    gcs_bucket: str
+    gcs_prefix: str
+
     api_key: str
     app_password: str
     session_secret: str
@@ -69,18 +75,13 @@ class Settings:
     whisper_model: str
     whisper_compute_type: str
 
+    send_video: bool
+    video_max_bytes: int
+
     cookies_file: str | None
+    cookies_b64: str
     cookies_from_browser: str | None
-    keep_video: bool
     max_video_seconds: int
-
-    @property
-    def db_path(self) -> Path:
-        return self.data_dir / "recetas.sqlite3"
-
-    @property
-    def media_dir(self) -> Path:
-        return self.data_dir / "media"
 
     @property
     def work_dir(self) -> Path:
@@ -96,6 +97,12 @@ class Settings:
             api_key = secrets.token_urlsafe(24)
         return cls(
             data_dir=data_dir,
+            # Cloud Run define K_SERVICE. Ahí no hay CPU asignada después de
+            # responder, así que el trabajo no puede quedarse en segundo plano.
+            serverless=_env_bool("SERVERLESS", bool(os.getenv("K_SERVICE"))),
+            storage_backend=os.getenv("STORAGE_BACKEND", "local").strip().lower(),
+            gcs_bucket=os.getenv("GCS_BUCKET", "").strip(),
+            gcs_prefix=os.getenv("GCS_PREFIX", "recetario").strip(),
             api_key=api_key,
             app_password=os.getenv("APP_PASSWORD", "").strip() or api_key,
             session_secret=os.getenv("SESSION_SECRET", "").strip() or api_key,
@@ -115,14 +122,18 @@ class Settings:
             transcriber=os.getenv("TRANSCRIBER", "auto").strip().lower(),
             whisper_model=os.getenv("WHISPER_MODEL", "small"),
             whisper_compute_type=os.getenv("WHISPER_COMPUTE_TYPE", "int8"),
+            send_video=_env_bool("SEND_VIDEO", True),
+            # Gemini admite hasta 20 MB por petición contando la codificación
+            # base64; dejamos margen para el texto del prompt.
+            video_max_bytes=_env_int("VIDEO_MAX_BYTES", 13 * 1024 * 1024),
             cookies_file=os.getenv("IG_COOKIES_FILE", "").strip() or None,
+            cookies_b64=os.getenv("IG_COOKIES_B64", "").strip(),
             cookies_from_browser=os.getenv("IG_COOKIES_FROM_BROWSER", "").strip() or None,
-            keep_video=_env_bool("KEEP_VIDEO", False),
             max_video_seconds=_env_int("MAX_VIDEO_SECONDS", 900),
         )
 
     def ensure_dirs(self) -> None:
-        for path in (self.data_dir, self.media_dir, self.work_dir):
+        for path in (self.data_dir, self.work_dir):
             path.mkdir(parents=True, exist_ok=True)
 
 

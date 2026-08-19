@@ -194,3 +194,23 @@ def test_sin_el_paquete_anthropic_se_explica_como_instalarlo(monkeypatch):
 
     with pytest.raises(ProviderError, match="pip install anthropic"):
         get_provider("anthropic")
+
+
+def test_gemini_manda_el_video_con_su_tipo_mime(monkeypatch, tmp_path):
+    capture = {}
+    video = tmp_path / "reel.mp4"
+    video.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    payload = {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "{}"}]}}]}
+    monkeypatch.setattr(
+        "app.pipeline.providers.gemini_provider.httpx.post", _fake_post(capture, _response(200, payload))
+    )
+
+    GeminiProvider(api_key="k").generate("s", [("text", "contexto"), ("video", video)])
+
+    partes = capture["json"]["contents"][0]["parts"]
+    assert partes[1]["inline_data"]["mime_type"] == "video/mp4"
+
+
+def test_solo_gemini_acepta_el_video_entero():
+    assert get_provider("gemini").accepts_video is True
+    assert get_provider("ollama").accepts_video is False

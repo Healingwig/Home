@@ -24,7 +24,7 @@ SYSTEM_PROMPT = f"""Eres un chef que transcribe recetas de vídeos cortos de red
 Recibes tres fuentes sobre el mismo vídeo, en orden de fiabilidad:
 1. El texto del post (pie de foto): suele traer la lista de ingredientes con cantidades. Es la fuente más fiable para las cantidades.
 2. La transcripción del audio: lo que dice la persona mientras cocina. Fiable para el orden y la técnica.
-3. Fotogramas del vídeo en orden cronológico: muestran los ingredientes, las texturas y, muy a menudo, texto sobreimpreso con las cantidades. Léelo.
+3. El vídeo (entero, o como fotogramas en orden cronológico): muestra los ingredientes, las texturas y, muy a menudo, texto sobreimpreso con las cantidades. Léelo. Si recibes el vídeo completo, escucha también lo que se dice.
 
 Reglas:
 - Escribe TODO en {settings.language}, incluidos los nombres de ingredientes y utensilios.
@@ -51,6 +51,7 @@ class ExtractionInput:
     source_url: str = ""
     duration: float | None = None
     frames: list[tuple[float, Path]] = field(default_factory=list)
+    video: Path | None = None
 
 
 class ExtractionError(RuntimeError):
@@ -80,17 +81,21 @@ def _context_text(payload: ExtractionInput) -> str:
 def build_parts(payload: ExtractionInput) -> list[Part]:
     """Material del vídeo en fragmentos que cada backend traduce a su formato."""
     parts: list[Part] = [("text", _context_text(payload))]
-    if payload.frames:
+    if payload.video:
+        parts.append(("text", "\nVídeo completo del reel, con su audio:"))
+        parts.append(("video", payload.video))
+    elif payload.frames:
         parts.append(
             ("text", f"\nFotogramas del vídeo ({len(payload.frames)}), en orden cronológico:")
         )
         for index, (timestamp, path) in enumerate(payload.frames, start=1):
             parts.append(("text", f"Fotograma {index} de {len(payload.frames)}, en {timestamp:.1f}s:"))
             parts.append(("image", path))
+    material = "el vídeo" if payload.video else "los fotogramas"
     parts.append(
         (
             "text",
-            "\nDevuelve la receta completa siguiendo el esquema. Repasa los fotogramas en busca de "
+            f"\nDevuelve la receta completa siguiendo el esquema. Repasa {material} en busca de "
             "cantidades sobreimpresas antes de dar por perdida una cantidad.",
         )
     )
@@ -127,7 +132,7 @@ def _strip_wrapper(raw: str) -> str:
 
 
 def extract_recipe(payload: ExtractionInput, provider: Provider | None = None) -> Recipe:
-    if not payload.caption.strip() and not payload.transcript.strip() and not payload.frames:
+    if not (payload.caption.strip() or payload.transcript.strip() or payload.frames or payload.video):
         raise ExtractionError("No hay material suficiente (ni texto, ni audio, ni imágenes).")
 
     try:

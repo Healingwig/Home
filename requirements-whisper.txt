@@ -1,0 +1,3 @@
+# Transcripción local del audio. Solo hace falta con LLM_PROVIDER=ollama o
+# anthropic: Gemini recibe el vídeo con su audio y lo escucha él mismo.
+faster-whisper>=1.0.3

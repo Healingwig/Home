@@ -59,12 +59,22 @@ def frame_timestamps(duration: float, count: int) -> list[float]:
 
 def extract_frames(video: Path, out_dir: Path, count: int, max_dim: int) -> list[tuple[float, Path]]:
     """Devuelve [(segundo, ruta_jpg)] con fotogramas repartidos por el vídeo."""
+    stamps = frame_timestamps(duration_seconds(video), count)
+    frames = extract_frames_at(video, out_dir, stamps, max_dim)
+    if not frames:
+        raise MediaError("ffmpeg no pudo extraer ningún fotograma del vídeo.")
+    return frames
+
+
+def extract_frames_at(
+    video: Path, out_dir: Path, timestamps: list[float], max_dim: int
+) -> list[tuple[float, Path]]:
+    """Extrae los fotogramas de los instantes indicados."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    duration = duration_seconds(video)
     frames: list[tuple[float, Path]] = []
     scale = f"scale='min({max_dim},iw)':-2:flags=lanczos"
 
-    for index, timestamp in enumerate(frame_timestamps(duration, count)):
+    for index, timestamp in enumerate(timestamps):
         target = out_dir / f"frame_{index:02d}.jpg"
         result = _run(
             [
@@ -79,8 +89,6 @@ def extract_frames(video: Path, out_dir: Path, count: int, max_dim: int) -> list
         else:
             logger.warning("No se pudo extraer el fotograma en %.2fs: %s", timestamp, result.stderr.strip()[:120])
 
-    if not frames:
-        raise MediaError("ffmpeg no pudo extraer ningún fotograma del vídeo.")
     return frames
 
 
@@ -101,3 +109,44 @@ def extract_audio(video: Path, out_path: Path) -> Path | None:
         logger.warning("No se pudo extraer el audio: %s", result.stderr.strip()[:200])
         return None
     return out_path
+
+
+def compress_for_upload(video: Path, out_path: Path, max_bytes: int) -> Path | None:
+    """Recomprime el vídeo para que quepa en una petición al modelo.
+
+    Devuelve el original si ya cabe, el recomprimido si se consigue, o None si
+    ni bajando la calidad entra (entonces se usan fotogramas sueltos).
+    """
+    if video.stat().st_size <= max_bytes and video.suffix.lower() == ".mp4":
+        return video
+
+    duration = duration_seconds(video)
+    if duration <= 0:
+        return None
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    for height, audio_kbps in ((480, 48), (360, 32)):
+        # Bitrate objetivo a partir del tamaño máximo, con margen para el
+        # contenedor. El audio importa: Gemini lo transcribe.
+        total_kbps = (max_bytes * 8 / 1000) / duration * 0.88
+        video_kbps = max(int(total_kbps - audio_kbps), 120)
+        result = _run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(video),
+                "-vf", f"scale='min(iw,trunc(ih*{height}/ih))':'min({height},ih)':flags=lanczos",
+                "-c:v", "libx264", "-preset", "veryfast",
+                "-b:v", f"{video_kbps}k", "-maxrate", f"{int(video_kbps * 1.4)}k",
+                "-bufsize", f"{video_kbps * 2}k",
+                "-c:a", "aac", "-b:a", f"{audio_kbps}k", "-ac", "1",
+                "-movflags", "+faststart", "-y", str(out_path),
+            ],
+            timeout=900,
+        )
+        if result.returncode == 0 and out_path.exists() and out_path.stat().st_size <= max_bytes:
+            logger.info(
+                "Vídeo recomprimido a %.1f MB (%dp)", out_path.stat().st_size / 1e6, height
+            )
+            return out_path
+        logger.warning("La recompresión a %dp no bastó: %s", height, result.stderr.strip()[:150])
+
+    return None

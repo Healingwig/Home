@@ -18,6 +18,9 @@ ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:gene
 
 class GeminiProvider:
     name = "gemini"
+    # Gemini procesa el vídeo entero: ve las imágenes y escucha el audio, así
+    # que no hace falta ni extraer fotogramas ni transcribir por separado.
+    accepts_video = True
 
     def __init__(self, api_key: str | None = None, model: str | None = None):
         self.api_key = api_key if api_key is not None else settings.gemini_api_key
@@ -33,9 +36,8 @@ class GeminiProvider:
             if kind == "text":
                 contents.append({"text": str(value)})
             else:
-                contents.append(
-                    {"inline_data": {"mime_type": "image/jpeg", "data": encode_image(value)}}
-                )
+                mime = "video/mp4" if kind == "video" else "image/jpeg"
+                contents.append({"inline_data": {"mime_type": mime, "data": encode_image(value)}})
 
         return {
             "systemInstruction": {"parts": [{"text": system}]},
@@ -65,6 +67,11 @@ class GeminiProvider:
             )
         if response.status_code == 400 and "API key" in response.text:
             raise ProviderError("La GEMINI_API_KEY no es válida.")
+        if response.status_code in (400, 413) and "too large" in response.text.lower():
+            raise ProviderError(
+                "El vídeo excede el tamaño que admite Gemini en una petición. "
+                "Baja VIDEO_MAX_BYTES o pon SEND_VIDEO=false."
+            )
         if response.status_code >= 400:
             raise ProviderError(f"Gemini devolvió {response.status_code}: {response.text[:300]}")
 

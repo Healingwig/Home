@@ -10,9 +10,12 @@ httpx>=0.27.0
 # Descarga del vídeo de Instagram
 yt-dlp>=2024.12.13
 
-# Transcripción del audio (opcional: si no está instalado, el pipeline sigue
-# funcionando solo con la descripción del post y los fotogramas)
-faster-whisper>=1.0.3
+# Almacenamiento de las recetas en Google Cloud Storage (STORAGE_BACKEND=gcs).
+# Con STORAGE_BACKEND=local no se usa, pero pesa poco y evita sorpresas.
+google-cloud-storage>=2.18.0
 
-# Los backends gratuitos (Ollama y Gemini) hablan por HTTP: no hacen falta
-# más dependencias. Para usar Claude: pip install -r requirements-anthropic.txt
+# Los backends de modelo hablan por HTTP: Gemini y Ollama no necesitan nada
+# más. Extras opcionales:
+#   requirements-whisper.txt   transcribir el audio en local (no hace falta
+#                              con Gemini, que ya escucha el vídeo)
+#   requirements-anthropic.txt usar Claude (de pago)

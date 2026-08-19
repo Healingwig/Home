@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -12,17 +13,18 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import (
-    FileResponse,
     HTMLResponse,
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
+    Response,
+    StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from app import db, security
+from app import security, storage
 from app.config import settings
 from app.models import Recipe
 from app.pipeline import download, process_recipe
@@ -46,16 +48,17 @@ _workers = ThreadPoolExecutor(
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     settings.ensure_dirs()
-    db.init_db()
+    storage.init()
     if not os.getenv("API_KEY"):
         logger.warning("API_KEY no configurada. Clave temporal de esta ejecución: %s", settings.api_key)
     if not ffmpeg_available():
         logger.warning("ffmpeg/ffprobe no están en el PATH: sin fotogramas ni transcripción.")
     ready, detail = check_provider()
     logger.log(logging.INFO if ready else logging.WARNING, "Modelo (%s): %s", settings.llm_provider, detail)
+    logger.info("Almacenamiento: %s · serverless: %s", settings.storage_backend, settings.serverless)
     # Recetas que se quedaron a medias en un reinicio anterior.
-    for stale in db.iter_stale_processing(older_than_seconds=1800):
-        db.update_recipe(stale["id"], status="error", error="El proceso se interrumpió. Vuelve a intentarlo.")
+    for stale in storage.iter_stale_processing(older_than_seconds=1800):
+        storage.update_recipe(stale["id"], status="error", error="El proceso se interrumpió. Vuelve a intentarlo.")
     yield
     _workers.shutdown(wait=False, cancel_futures=True)
 
@@ -74,8 +77,18 @@ class RecipeRequest(BaseModel):
     wait: int = Field(default=0, ge=0, le=240, description="Segundos a esperar a que esté lista")
 
 
-def _enqueue(recipe_id: str, url: str) -> None:
-    _workers.submit(process_recipe, recipe_id, url)
+def _enqueue(recipe_id: str, url: str, inline: bool = False) -> None:
+    """Lanza el procesado.
+
+    `inline` es para las rutas web en plataformas serverless: allí el
+    contenedor se congela en cuanto se responde, así que un hilo de fondo no
+    llegaría a terminar. Las rutas de la API no lo necesitan porque mantienen
+    la petición abierta con `wait`.
+    """
+    if inline:
+        process_recipe(recipe_id, url)
+    else:
+        _workers.submit(process_recipe, recipe_id, url)
 
 
 def _recipe_object(row: dict[str, Any]) -> Recipe | None:
@@ -105,17 +118,36 @@ def _public_row(row: dict[str, Any], request: Request | None = None) -> dict[str
     return payload
 
 
-async def _await_ready(recipe_id: str, seconds: int) -> dict[str, Any]:
-    deadline = asyncio.get_running_loop().time() + seconds
-    row = db.get_recipe(recipe_id)
-    while row and row["status"] in {"pending", "processing"} and asyncio.get_running_loop().time() < deadline:
-        await asyncio.sleep(2)
-        row = db.get_recipe(recipe_id)
-    return row or {}
+POLL_SECONDS = 3
+
+
+def _streamed_wait(recipe_id: str, url: str, request: Request, seconds: int) -> StreamingResponse:
+    """Una sola petición que no responde hasta que la receta está lista.
+
+    Mientras espera va soltando espacios en blanco: iOS corta una conexión que
+    pasa 60 s sin recibir nada, y el espacio delante de un objeto JSON es
+    válido, así que el Atajo puede leer el cuerpo tal cual. Además mantiene la
+    petición viva, que es lo que hace que el servidor siga teniendo CPU
+    asignada en plataformas que escalan a cero.
+    """
+
+    async def body():
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + seconds
+        row = await asyncio.to_thread(storage.get_recipe, recipe_id)
+        while row and row["status"] in {"pending", "processing"} and loop.time() < deadline:
+            yield b" "
+            await asyncio.sleep(POLL_SECONDS)
+            row = await asyncio.to_thread(storage.get_recipe, recipe_id)
+
+        payload = _public_row(row or {"id": recipe_id, "status": "pending", "source_url": url}, request)
+        yield json.dumps(payload, ensure_ascii=False).encode()
+
+    return StreamingResponse(body(), media_type="application/json")
 
 
 def _load_ready_recipe(recipe_id: str) -> tuple[dict[str, Any], Recipe]:
-    row = db.get_recipe(recipe_id)
+    row = storage.get_recipe(recipe_id)
     if not row:
         raise HTTPException(status_code=404, detail="No existe esa receta.")
     if row["status"] != "ready":
@@ -148,14 +180,17 @@ async def api_create_recipe(payload: RecipeRequest, request: Request) -> JSONRes
     if not download.is_supported_url(url):
         raise HTTPException(status_code=400, detail="Eso no parece un enlace válido.")
 
-    existing = None if payload.force else db.find_by_url(url)
+    existing = None if payload.force else storage.find_by_url(url)
     if existing:
         recipe_id = existing["id"]
     else:
-        recipe_id = db.create_recipe(url)
+        recipe_id = storage.create_recipe(url)
         _enqueue(recipe_id, url)
 
-    row = await _await_ready(recipe_id, payload.wait) if payload.wait else db.get_recipe(recipe_id)
+    if payload.wait:
+        return _streamed_wait(recipe_id, url, request, payload.wait)
+
+    row = storage.get_recipe(recipe_id)
     body = _public_row(row or {"id": recipe_id, "status": "pending", "source_url": url}, request)
     body["reused"] = bool(existing)
     return JSONResponse(body, status_code=200 if existing else 202)
@@ -163,13 +198,18 @@ async def api_create_recipe(payload: RecipeRequest, request: Request) -> JSONRes
 
 @app.get("/api/recipes", dependencies=[Depends(security.require_api_key)])
 def api_list_recipes(request: Request, q: str | None = None, limit: int = 50) -> dict[str, Any]:
-    rows = db.list_recipes(limit=min(limit, 200), query=q)
-    return {"count": len(rows), "recipes": [_public_row(row, request) for row in rows]}
+    rows = storage.list_recipes(limit=min(limit, 200), query=q)
+    recipes = [
+        {**{key: value for key, value in row.items() if key != "haystack"},
+         "web_url": str(request.url_for("recipe_page", recipe_id=row["id"]))}
+        for row in rows
+    ]
+    return {"count": len(recipes), "recipes": recipes}
 
 
 @app.get("/api/recipes/{recipe_id}", dependencies=[Depends(security.require_api_key)])
 def api_get_recipe(recipe_id: str, request: Request) -> dict[str, Any]:
-    row = db.get_recipe(recipe_id)
+    row = storage.get_recipe(recipe_id)
     if not row:
         raise HTTPException(status_code=404, detail="No existe esa receta.")
     return _public_row(row, request)
@@ -199,19 +239,17 @@ def api_shopping_list(
 
 @app.post("/api/recipes/{recipe_id}/retry", dependencies=[Depends(security.require_api_key)])
 def api_retry(recipe_id: str, request: Request) -> dict[str, Any]:
-    row = db.get_recipe(recipe_id)
+    row = storage.get_recipe(recipe_id)
     if not row:
         raise HTTPException(status_code=404, detail="No existe esa receta.")
-    db.update_recipe(recipe_id, status="pending", error=None)
+    storage.update_recipe(recipe_id, status="pending", error=None)
     _enqueue(recipe_id, row["source_url"])
-    return _public_row(db.get_recipe(recipe_id) or row, request)
+    return _public_row(storage.get_recipe(recipe_id) or row, request)
 
 
 @app.delete("/api/recipes/{recipe_id}", dependencies=[Depends(security.require_api_key)])
 def api_delete(recipe_id: str) -> dict[str, Any]:
-    thumbnail = settings.media_dir / f"{recipe_id}.jpg"
-    thumbnail.unlink(missing_ok=True)
-    if not db.delete_recipe(recipe_id):
+    if not storage.delete_recipe(recipe_id):
         raise HTTPException(status_code=404, detail="No existe esa receta.")
     return {"deleted": recipe_id}
 
@@ -258,15 +296,9 @@ def logout() -> RedirectResponse:
 def index(request: Request, q: str | None = None):
     if not security.web_session_ok(request):
         return _redirect_to_login(request)
-    rows = db.list_recipes(query=q)
     cards = [
-        {
-            **row,
-            "display_title": (row.get("data") or {}).get("title") or row.get("title") or "Sin título",
-            "summary": (row.get("data") or {}).get("summary") or "",
-            "total_minutes": _total_minutes(row.get("data")),
-        }
-        for row in rows
+        {**row, "display_title": row.get("title") or "Sin título"}
+        for row in storage.list_recipes(query=q)
     ]
     return templates.TemplateResponse(request, "index.html", {"recipes": cards, "q": q or ""})
 
@@ -278,11 +310,11 @@ def web_create(request: Request, url: str = Form(...)):
     clean = download.normalize_url(url)
     if not download.is_supported_url(clean):
         return RedirectResponse(url="/?error=url", status_code=303)
-    existing = db.find_by_url(clean)
+    existing = storage.find_by_url(clean)
     if existing:
         return RedirectResponse(url=f"/receta/{existing['id']}", status_code=303)
-    recipe_id = db.create_recipe(clean)
-    _enqueue(recipe_id, clean)
+    recipe_id = storage.create_recipe(clean)
+    _enqueue(recipe_id, clean, inline=settings.serverless)
     return RedirectResponse(url=f"/receta/{recipe_id}", status_code=303)
 
 
@@ -290,7 +322,7 @@ def web_create(request: Request, url: str = Form(...)):
 def recipe_page(request: Request, recipe_id: str, servings: int | None = None):
     if not security.web_session_ok(request):
         return _redirect_to_login(request)
-    row = db.get_recipe(recipe_id)
+    row = storage.get_recipe(recipe_id)
     if not row:
         raise HTTPException(status_code=404, detail="No existe esa receta.")
 
@@ -315,11 +347,11 @@ def recipe_page(request: Request, recipe_id: str, servings: int | None = None):
 def web_retry(request: Request, recipe_id: str):
     if not security.web_session_ok(request):
         return _redirect_to_login(request)
-    row = db.get_recipe(recipe_id)
+    row = storage.get_recipe(recipe_id)
     if not row:
         raise HTTPException(status_code=404, detail="No existe esa receta.")
-    db.update_recipe(recipe_id, status="pending", error=None)
-    _enqueue(recipe_id, row["source_url"])
+    storage.update_recipe(recipe_id, status="pending", error=None)
+    _enqueue(recipe_id, row["source_url"], inline=settings.serverless)
     return RedirectResponse(url=f"/receta/{recipe_id}", status_code=303)
 
 
@@ -327,8 +359,7 @@ def web_retry(request: Request, recipe_id: str):
 def web_delete(request: Request, recipe_id: str):
     if not security.web_session_ok(request):
         return _redirect_to_login(request)
-    (settings.media_dir / f"{recipe_id}.jpg").unlink(missing_ok=True)
-    db.delete_recipe(recipe_id)
+    storage.delete_recipe(recipe_id)
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -336,16 +367,9 @@ def web_delete(request: Request, recipe_id: str):
 def media_file(request: Request, filename: str):
     if not security.web_session_ok(request):
         raise HTTPException(status_code=401, detail="Sesión no iniciada")
-    # `filename` viene de la BD, pero lo anclamos igualmente al directorio de medios.
-    path = (settings.media_dir / Path(filename).name).resolve()
-    if not str(path).startswith(str(settings.media_dir.resolve())) or not path.is_file():
+    image = storage.read_thumbnail(Path(filename).stem)
+    if image is None:
         raise HTTPException(status_code=404, detail="No encontrado")
-    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
-
-
-def _total_minutes(data: dict[str, Any] | None) -> int | None:
-    if not data:
-        return None
-    parts = [data.get("prep_minutes"), data.get("cook_minutes")]
-    total = sum(p for p in parts if isinstance(p, int))
-    return total or None
+    return Response(
+        image, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"}
+    )

@@ -1,129 +1,114 @@
 # El Atajo de iOS: de Instagram a la receta y a Recordatorios
 
 Este es el trozo que hace que todo sea cómodo: ves un reel, tocas **Compartir →
-Guardar receta**, y a los dos minutos tienes la receta en la tablet y los
-ingredientes en tu lista de la compra.
+Guardar receta**, y al minuto tienes la receta en la tablet y los ingredientes
+en tu lista de la compra.
 
-No hace falta instalar ninguna app: se hace con **Atajos** (viene con iOS).
+No hace falta instalar ninguna app: se hace con **Atajos**, que ya viene con iOS.
 
 ---
 
 ## Antes de empezar
 
-Necesitas dos datos del servidor que tienes corriendo en casa (ver
-[despliegue.md](despliegue.md)):
+Necesitas dos datos del despliegue (ver [despliegue.md](despliegue.md)):
 
 | Dato | Ejemplo |
 |---|---|
-| Dirección de tu app | `http://192.168.1.42:8000` (tu red) o `https://mac.tu-tailnet.ts.net` (Tailscale) |
-| Tu `API_KEY` | `k7Fh2...` (la que pusiste en el `.env`) |
+| Dirección de tu app | `https://recetas-xxxxx-uc.a.run.app` |
+| Tu `API_KEY` | `k7Fh2...` (la que generaste al desplegar) |
 
-En lo que sigue los llamo `TU-DIRECCION` y `TU-CLAVE`. Si usas la IP local, el
-Atajo solo funcionará estando en tu Wi-Fi; con Tailscale funciona en cualquier
-sitio. `http://` sin cifrar es válido en Atajos dentro de tu propia red.
+En lo que sigue los llamo `TU-DIRECCION` y `TU-CLAVE`.
 
 ---
 
 ## Atajo 1 — «Guardar receta» (el importante)
 
+Son siete acciones. El servidor hace todo el trabajo en una sola petición: el
+Atajo pregunta una vez y se queda esperando la respuesta.
+
 ### Configuración del atajo
 
 1. Abre **Atajos** → **+** (arriba a la derecha).
-2. Toca el nombre del atajo → **Renombrar** → `Guardar receta`.
+2. Toca el nombre → **Renombrar** → `Guardar receta`.
 3. En el mismo menú → **Detalles del atajo**:
    - Activa **Mostrar en la hoja de compartir**.
-   - En **Tipos de entrada de la hoja de compartir**, deja marcados solo
-     **URLs** y **Texto** (Instagram comparte a veces texto con la URL dentro;
-     la API sabe extraerla).
+   - En **Tipos de entrada**, deja marcados **URLs** y **Texto** (Instagram
+     comparte a veces texto con la URL dentro; el servidor sabe extraerla).
 
 ### Acciones, en orden
 
 **1. Obtener URLs de la entrada**
-- Busca la acción `Obtener URLs de la entrada`.
-- Como entrada, elige la variable mágica **Entrada del atajo**.
+- Como entrada, la variable mágica **Entrada del atajo**.
 
-**2. Obtener contenido de la URL** *(crear la receta)*
+**2. Obtener contenido de la URL** *(hace la receta entera)*
 - URL: `TU-DIRECCION/api/recipes`
-- Despliega la flecha ▸ para ver las opciones:
+- Despliega la flecha ▸:
   - **Método**: `POST`
-  - **Encabezados**: añade uno → clave `X-API-Key`, valor `TU-CLAVE`
+  - **Encabezados**: clave `X-API-Key`, valor `TU-CLAVE`
   - **Cuerpo de la solicitud**: `JSON`
-    - Añade un campo de tipo **Texto** con clave `url` y valor la variable
-      mágica **URLs** (la salida del paso 1).
+    - Campo **Texto** con clave `url` y valor la variable mágica **URLs**.
+    - Campo **Número** con clave `wait` y valor `240`.
+
+> `wait` es lo que hace que esta única acción no responda hasta que la receta
+> está lista (hasta 4 minutos). Mientras tanto el servidor va mandando datos
+> para que iOS no corte la conexión, así que no tienes que montar ningún bucle.
 
 **3. Obtener valor de diccionario**
-- Obtener el valor de `id` en **Contenido de la URL**.
-- Renombra la variable (mantén pulsado → *Renombrar*) a `IdReceta`.
+- Valor de `recipe.title` en **Contenido de la URL**. Renómbralo a `Titulo`
+  (mantén pulsado → *Renombrar*).
 
-**4. Repetir 60 veces** *(esperar a que la receta esté lista)*
+**4. Obtener valor de diccionario**
+- Valor de `id` en **Contenido de la URL**. Renómbralo a `IdReceta`.
 
-> Son 60 vueltas × 5 s ≈ 5 minutos de margen. Con Gemini o Claude sobra de
-> largo; si usas un modelo local en un equipo sin GPU, sube a `150`.
+**5. Obtener contenido de la URL** *(la lista de la compra)*
+- URL: `TU-DIRECCION/api/recipes/` + variable `IdReceta` + `/shopping-list?format=text`
+  (escribe el texto y arrastra la variable en medio)
+- Método `GET`, encabezado `X-API-Key` = `TU-CLAVE`.
 
-Dentro del bucle:
+**6. Dividir texto**
+- Entrada: el contenido anterior. Separador: **Líneas**.
 
-  **4.1. Obtener contenido de la URL**
-  - URL: `TU-DIRECCION/api/recipes/` + variable `IdReceta`
-    (escribe la primera parte y arrastra la variable justo al final)
-  - Método `GET`, encabezado `X-API-Key` = `TU-CLAVE`.
+**7. Repetir con cada elemento**
+- Entrada: **Texto dividido**.
+- Dentro: **Añadir nuevo recordatorio**
+  - Recordatorio: variable **Elemento repetido**
+  - Lista: tu **Lista de la compra**
 
-  **4.2. Obtener valor de diccionario** → valor de `status` en **Contenido de la URL**.
-
-  **4.3. Si** `Valor del diccionario` **es** `ready`:
-
-  Dentro del *Si* (todo lo que sigue va aquí dentro):
-
-  - **Obtener contenido de la URL**
-    `TU-DIRECCION/api/recipes/[IdReceta]/shopping-list?format=text`
-    · Método `GET` · encabezado `X-API-Key` = `TU-CLAVE`
-  - **Dividir texto** → por **Líneas** (entrada: el contenido anterior)
-  - **Repetir con cada elemento** (entrada: **Texto dividido**)
-    - **Añadir nuevo recordatorio**
-      - Recordatorio: variable **Elemento repetido**
-      - Lista: tu **Lista de la compra**
-  - **Obtener valor de diccionario** → `title` en la respuesta del paso 4.1
-    (usa **Contenido de la URL** de ese paso; si te lía, usa `recipe` → `title`)
-  - **Mostrar notificación**: `Receta lista: [title]`
-  - **Detener este atajo**
-
-  **4.4. Si no:**
-  - **Esperar** `5` segundos
-
-  Fin del *Si*. Fin del *Repetir*.
-
-**5. Mostrar notificación** (fuera del bucle)
-- `La receta está tardando más de lo normal. Ábrela en TU-DIRECCION dentro de un rato.`
+**8. Mostrar notificación** *(opcional pero recomendable)*
+- Texto: `Receta lista: ` + variable `Titulo`
 
 ### Probarlo
 
 1. Abre Instagram, busca un reel de cocina.
 2. **Compartir** (el avioncito) → **Atajos** → **Guardar receta**.
-3. A los 30–90 s recibes la notificación y los ingredientes aparecen en
-   Recordatorios.
+3. Al minuto llega la notificación y los ingredientes están en Recordatorios.
 
-> **Truco:** en el paso 4.3, cambia la URL de la lista de la compra por
-> `…/shopping-list?format=text&servings=4` si sueles cocinar para cuatro. La API
-> reescala las cantidades sola.
+> **Si algo falla**, el campo `error` de la respuesta dice qué ha pasado. Lo más
+> habitual es que hagan falta cookies de Instagram
+> ([despliegue.md](despliegue.md#3-cookies-de-instagram)).
 
 ---
 
 ## Ajustes útiles de la lista de la compra
 
-Todos son parámetros que puedes añadir a la URL del paso 4.3:
+Parámetros que puedes añadir a la URL del paso 5:
 
 | Parámetro | Por defecto | Para qué sirve |
 |---|---|---|
 | `servings=4` | las del vídeo | Reescala las cantidades a N raciones |
 | `include_pantry=true` | `false` | Incluye sal, aceite, agua y azúcar (por defecto se omiten) |
-| `include_optional=false` | `true` | Deja fuera los ingredientes marcados como opcionales |
-| `prefix_title=true` | `false` | Añade el nombre del plato a cada línea: útil si mezclas varias recetas en la misma lista |
+| `include_optional=false` | `true` | Deja fuera los ingredientes opcionales |
+| `prefix_title=true` | `false` | Añade el nombre del plato a cada línea: útil si mezclas varias recetas |
 | `format=text` | `json` | Texto plano, una línea por producto (lo que quiere Atajos) |
+
+Si sueles cocinar para cuatro, deja fija la URL con `&servings=4`: las
+cantidades llegan ya escaladas.
 
 ---
 
 ## Atajo 2 (opcional) — «Añadir receta a la compra»
 
-Para cuando quieres cocinar algo que guardaste hace semanas.
+Para cocinar algo que guardaste hace semanas.
 
 1. **Obtener contenido de la URL** → `TU-DIRECCION/api/recipes?limit=50`
    con el encabezado `X-API-Key`.
@@ -134,29 +119,30 @@ Para cuando quieres cocinar algo que guardaste hace semanas.
 5. **Pedir entrada** → Número → `¿Para cuántas raciones?`
 6. **Obtener contenido de la URL** →
    `TU-DIRECCION/api/recipes/[id]/shopping-list?format=text&servings=[Entrada]`
-7. **Dividir texto** por líneas → **Repetir con cada elemento** → **Añadir nuevo recordatorio**.
+7. **Dividir texto** por líneas → **Repetir con cada elemento** →
+   **Añadir nuevo recordatorio**.
 
 ---
 
 ## Si usas otra app para la compra
 
-Solo cambia la acción **Añadir nuevo recordatorio** por la equivalente:
+Cambia solo la acción **Añadir nuevo recordatorio** por la equivalente:
 
-- **Bring!** → acción `Añadir artículo` (la app publica su propia acción de Atajos).
-- **AnyList** → acción `Add Items to List`.
-- **Google Keep / Todoist / Things** → acción de crear tarea de cada app.
-- **Notas** → `Añadir al ítem de nota`, apuntando a una nota fija.
+- **Bring!** → `Añadir artículo`
+- **AnyList** → `Add Items to List`
+- **Todoist / Things / Google Keep** → la acción de crear tarea de cada app
+- **Notas** → `Añadir al ítem de nota`, apuntando a una nota fija
 
-El resto del atajo no cambia: la API siempre te da una línea de texto por producto.
+El resto no cambia: el servidor siempre da una línea de texto por producto.
 
 ---
 
 ## La tablet
 
-En la tablet, abre `TU-DIRECCION` en Safari, introduce tu `APP_PASSWORD` una vez y
-después **Compartir → Añadir a pantalla de inicio**. Queda como una app: sin
-barra de navegador y a pantalla completa.
+Abre `TU-DIRECCION` en Safari, introduce tu `APP_PASSWORD` una vez y después
+**Compartir → Añadir a pantalla de inicio**. Queda como una app: sin barra de
+navegador y a pantalla completa.
 
-Dentro de una receta, el botón **👨‍🍳 Modo cocina** pasa a letra grande, un paso
-por pantalla, con temporizadores y **evitando que la pantalla se apague**
-mientras cocinas. Se avanza tocando, deslizando o con las flechas del teclado.
+Dentro de una receta, **👨‍🍳 Modo cocina** pasa a letra grande, un paso por
+pantalla, con temporizadores y **evitando que la pantalla se apague** mientras
+cocinas. Se avanza tocando, deslizando o con las flechas del teclado.

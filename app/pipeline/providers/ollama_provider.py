@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 class OllamaProvider:
     name = "ollama"
+    accepts_video = False
 
     def __init__(self, host: str | None = None, model: str | None = None):
         self.host = (host or settings.ollama_host).rstrip("/")

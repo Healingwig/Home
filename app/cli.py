@@ -9,7 +9,7 @@ import argparse
 import json
 import sys
 
-from app import db
+from app import storage
 from app.config import settings
 from app.models import Recipe
 from app.pipeline import download, process_recipe
@@ -24,14 +24,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     settings.ensure_dirs()
-    db.init_db()
+    storage.init()
 
     url = download.normalize_url(args.url)
-    recipe_id = db.create_recipe(url)
+    recipe_id = storage.create_recipe(url)
     print(f"Procesando {url} …", file=sys.stderr)
     process_recipe(recipe_id, url)
 
-    row = db.get_recipe(recipe_id) or {}
+    row = storage.get_recipe(recipe_id) or {}
     if row.get("status") != "ready":
         print(f"Error: {row.get('error', 'desconocido')}", file=sys.stderr)
         return 1

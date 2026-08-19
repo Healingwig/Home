@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import logging
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from app.config import settings
@@ -65,8 +68,9 @@ def _ydl_options(dest_dir: Path) -> dict:
         "socket_timeout": 30,
         "restrictfilenames": True,
     }
-    if settings.cookies_file:
-        options["cookiefile"] = settings.cookies_file
+    cookies = cookie_file()
+    if cookies:
+        options["cookiefile"] = cookies
     if settings.cookies_from_browser:
         options["cookiesfrombrowser"] = (settings.cookies_from_browser,)
     return options
@@ -147,3 +151,26 @@ def _explain(exc: Exception) -> str:
     if "private" in lowered:
         return "El post es privado y la cuenta configurada no tiene acceso."
     return f"No se pudo descargar el vídeo: {message.splitlines()[0][:300]}"
+
+
+@lru_cache(maxsize=1)
+def cookie_file() -> str | None:
+    """Ruta al fichero de cookies, venga de disco o de una variable de entorno.
+
+    En un contenedor sin disco propio no hay dónde dejar el fichero, así que
+    IG_COOKIES_B64 permite pasarlo como variable (base64 del fichero Netscape).
+    """
+    if settings.cookies_file and Path(settings.cookies_file).is_file():
+        return settings.cookies_file
+    if settings.cookies_b64:
+        target = settings.work_dir / "cookies_instagram.txt"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            target.write_bytes(base64.b64decode(settings.cookies_b64))
+        except (ValueError, binascii.Error) as exc:
+            logger.error("IG_COOKIES_B64 no es base64 válido: %s", exc)
+            return None
+        return str(target)
+    if settings.cookies_file:
+        logger.warning("IG_COOKIES_FILE apunta a %s, que no existe.", settings.cookies_file)
+    return None

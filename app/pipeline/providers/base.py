@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 # El contenido se describe de forma neutra y cada backend lo traduce a su
-# formato: Claude intercala texto e imágenes, Ollama manda las imágenes aparte.
-Part = tuple[Literal["text", "image"], str | Path]
+# formato: Claude intercala texto e imágenes, Ollama manda las imágenes aparte
+# y Gemini admite además el vídeo entero (con su audio).
+Part = tuple[Literal["text", "image", "video"], str | Path]
 
 
 class ProviderError(RuntimeError):
@@ -17,6 +18,7 @@ class ProviderError(RuntimeError):
 
 class Provider(Protocol):
     name: str
+    accepts_video: bool  # si admite el vídeo entero en vez de fotogramas sueltos
 
     def generate(self, system: str, parts: list[Part]) -> str:
         """Devuelve la respuesta del modelo como texto JSON sin parsear."""
@@ -33,3 +35,8 @@ def flatten_text(parts: list[Part]) -> str:
 
 def images_of(parts: list[Part]) -> list[Path]:
     return [Path(value) for kind, value in parts if kind == "image"]
+
+
+def drop_videos(parts: list[Part]) -> list[Part]:
+    """Descarta el vídeo para los backends que solo entienden imágenes."""
+    return [part for part in parts if part[0] != "video"]

@@ -75,3 +75,52 @@ def test_clave_por_query_string_funciona_para_el_atajo(client, stored_recipe):
 def test_borrar_receta(client, auth, stored_recipe):
     assert client.delete(f"/api/recipes/{stored_recipe}", headers=auth).status_code == 200
     assert client.get(f"/api/recipes/{stored_recipe}", headers=auth).status_code == 404
+
+
+# --- Espera en una sola petición (lo que usa el Atajo) ----------------------
+
+def test_wait_devuelve_la_receta_terminada_en_la_misma_peticion(client, auth, monkeypatch, sample_recipe):
+    from app import main, storage
+
+    def procesar_al_instante(_funcion, recipe_id, _url):
+        storage.update_recipe(recipe_id, status="ready", title=sample_recipe.title,
+                              data=sample_recipe.model_dump(mode="json"))
+
+    monkeypatch.setattr(main._workers, "submit", procesar_al_instante)
+
+    response = client.post(
+        "/api/recipes",
+        json={"url": "https://www.instagram.com/reel/ESPERA/", "wait": 30},
+        headers=auth,
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.json()["recipe"]["title"] == "Pasta al limón"
+
+
+def test_wait_va_mandando_espacios_para_que_ios_no_corte(client, auth, monkeypatch):
+    import json
+
+    from app import main
+
+    monkeypatch.setattr(main, "POLL_SECONDS", 0.05)
+    monkeypatch.setattr(main._workers, "submit", lambda *a, **k: None)
+
+    response = client.post(
+        "/api/recipes",
+        json={"url": "https://www.instagram.com/reel/LENTA/", "wait": 1},
+        headers=auth,
+    )
+    # El cuerpo lleva relleno delante, pero sigue siendo JSON válido.
+    assert response.text.startswith(" ")
+    assert json.loads(response.text)["status"] in {"pending", "processing"}
+    assert response.headers["content-type"].startswith("application/json")
+
+
+def test_wait_no_puede_pedir_mas_de_cuatro_minutos(client, auth):
+    response = client.post(
+        "/api/recipes",
+        json={"url": "https://www.instagram.com/reel/A/", "wait": 9999},
+        headers=auth,
+    )
+    assert response.status_code == 422

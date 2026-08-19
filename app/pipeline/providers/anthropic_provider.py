@@ -17,6 +17,7 @@ REFUSAL_FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
 class AnthropicProvider:
     name = "anthropic"
+    accepts_video = False
 
     def __init__(self, client: Any | None = None, model: str | None = None):
         self.model = model or settings.anthropic_model

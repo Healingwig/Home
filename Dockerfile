@@ -1,30 +1,28 @@
 FROM python:3.12-slim
 
-# ffmpeg es obligatorio para sacar fotogramas y audio del vídeo.
+# ffmpeg recomprime el vídeo antes de mandarlo al modelo y, cuando hace falta,
+# extrae fotogramas y audio.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    DATA_DIR=/data \
-    HF_HOME=/data/modelos
+    DATA_DIR=/tmp/recetas \
+    PORT=8000
 
 WORKDIR /srv
 
-COPY requirements.txt requirements-anthropic.txt ./
+COPY requirements*.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Solo si vas a usar LLM_PROVIDER=anthropic (de pago). Descomenta y reconstruye.
+# Extras opcionales (ver requirements-*.txt). Descomenta y reconstruye.
+# RUN pip install --no-cache-dir -r requirements-whisper.txt
 # RUN pip install --no-cache-dir -r requirements-anthropic.txt
 
 COPY app ./app
 
-RUN mkdir -p /data
-VOLUME ["/data"]
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
-    CMD python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/healthz')"
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# $PORT lo fija Cloud Run; en local se queda en 8000.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --proxy-headers --forwarded-allow-ips '*'"]
