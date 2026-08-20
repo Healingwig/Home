@@ -66,8 +66,9 @@ Te devuelve una URL con HTTPS. Después, **[docs/atajo-ios.md](docs/atajo-ios.md
 para montar el Atajo (son siete acciones).
 
 ¿No tienes ordenador a mano? **[docs/probarlo.md](docs/probarlo.md)** lo hace
-todo desde la tablet con Google Cloud Shell, probando por partes: primero que
-despliega, luego la web con una receta de ejemplo, y por último Instagram.
+todo desde la tablet con Google Cloud Shell —pantalla por pantalla, desde
+abrir la terminal— probando por partes: primero que despliega, luego la web con
+una receta de ejemplo, y por último Instagram.
 
 ¿Prefieres no dar una tarjeta a Google? Corre igual en tu equipo con
 `docker compose up -d`; la contrapartida está

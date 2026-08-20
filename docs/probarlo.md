@@ -9,7 +9,7 @@ sepas exactamente qué ha fallado:
 
 | | Qué pruebas | Cuánto tarda |
 |---|---|---|
-| 1 | Que la app despliega y arranca | ~10 min |
+| 1 | Que la app despliega y arranca | ~20 min la primera vez |
 | 2 | La web y el modo cocina, con una receta de ejemplo | 1 min |
 | 3 | Una receta de verdad, desde el navegador | 2 min |
 | 4 | El Atajo, compartiendo desde Instagram | 10 min |
@@ -18,28 +18,93 @@ sepas exactamente qué ha fallado:
 
 ## Paso 1 — Desplegar desde Cloud Shell
 
-Antes: saca tu clave de Gemini en <https://aistudio.google.com/apikey>
-(**Create API key**, es gratis y no pide tarjeta) y tenla a mano.
+Antes de empezar, saca tu clave de Gemini en
+<https://aistudio.google.com/apikey> (**Create API key**, es gratis y no pide
+tarjeta) y tenla a mano.
 
-1. En la tablet, abre <https://shell.cloud.google.com>. Pide entrar con tu
-   cuenta de Google y tarda unos segundos en arrancar.
-2. Si aún no tienes proyecto, créalo y actívalo:
+### 1.1 Abrir la terminal
+
+Abre <https://shell.cloud.google.com> en la tablet y entra con tu cuenta de
+Google.
+
+**Lo que verás es un editor de código**, con una pantalla de bienvenida que
+pone *«Code OSS for Cloud Shell»*. La terminal no sale sola: ábrela en el menú
+de arriba con **Terminal → New Terminal**. Aparece abajo, con un símbolo del
+sistema tipo `tunombre@cloudshell:~$`.
+
+- La primera vez sale un aviso de **Authorize** o de aceptar las condiciones:
+  acéptalo, es lo que le da permiso a la terminal para usar tu cuenta.
+- Si nunca has usado Google Cloud, te mandará antes a
+  <https://console.cloud.google.com> a aceptar los términos y elegir país.
+- Consejo para la tablet: un teclado Bluetooth ayuda bastante. Para pegar
+  texto, mantén pulsado dentro de la terminal.
+
+### 1.2 Crear el proyecto
+
+En la terminal:
 
 ```bash
 gcloud projects create recetas-$RANDOM --name="Recetas"
-gcloud projects list                    # copia el ID que te ha salido
+gcloud projects list
+```
+
+El segundo comando lista tus proyectos: copia el `PROJECT_ID` que empieza por
+`recetas-` y actívalo:
+
+```bash
 gcloud config set project EL-ID-QUE-HAS-COPIADO
 ```
 
-3. Asocia una cuenta de facturación al proyecto. Es en la consola web:
-   **console.cloud.google.com → Facturación → Vincular cuenta**. Pide tarjeta,
-   pero con este uso no llega a cobrar nada (ver
-   [despliegue.md](despliegue.md)).
+### 1.3 Activar la facturación
 
-4. Trae el código y despliégalo:
+Esto hay que hacerlo en la web, no en la terminal:
+<https://console.cloud.google.com/billing> → **Vincular una cuenta de
+facturación** al proyecto que acabas de crear. Pide tarjeta, pero con este uso
+no llega a cobrar nada (ver [despliegue.md](despliegue.md)).
+
+### 1.4 Traer el código
+
+El repositorio es **privado**, así que hay que identificarse en GitHub. Mira
+primero si Cloud Shell trae la herramienta de GitHub:
 
 ```bash
-git clone -b claude/instagram-recipe-app-ypfz15 https://github.com/Healingwig/Home.git recetas
+command -v gh
+```
+
+**Si contesta con una ruta** (lo más cómodo):
+
+```bash
+gh auth login
+```
+
+Elige *GitHub.com* → *HTTPS* → *Login with a web browser*. Te da un código de 8
+caracteres; ábrelo en <https://github.com/login/device> en otra pestaña de la
+misma tablet, pégalo y autoriza. Luego:
+
+```bash
+gh repo clone Healingwig/Home recetas -- -b claude/instagram-recipe-app-ypfz15
+```
+
+**Si no contesta nada**, usa un token de acceso:
+
+1. En la tablet, ve a <https://github.com/settings/personal-access-tokens/new>
+2. **Repository access** → *Only select repositories* → `Healingwig/Home`
+3. **Permissions** → *Repository permissions* → **Contents: Read-only**
+4. **Generate token** y copia el `github_pat_...`
+
+```bash
+git clone -b claude/instagram-recipe-app-ypfz15 \
+  https://TU-TOKEN@github.com/Healingwig/Home.git recetas
+```
+
+> Si algún día prefieres ahorrarte esto, puedes poner el repositorio en público
+> desde GitHub (*Settings → General → Change visibility*): en el código no hay
+> ninguna clave, solo el `.env.example` con huecos. Es cosa tuya; funciona
+> igual de las dos maneras.
+
+### 1.5 Desplegar
+
+```bash
 cd recetas
 bash scripts/desplegar.sh
 ```
@@ -55,7 +120,7 @@ Clave para el Atajo : k7Fh2...
 **Apunta las dos.** La clave del Atajo no se vuelve a mostrar (si la pierdes,
 el propio script te dice cómo recuperarla).
 
-5. Comprueba que respira:
+### 1.6 Comprobar que respira
 
 ```bash
 curl -s https://TU-DIRECCION/healthz
