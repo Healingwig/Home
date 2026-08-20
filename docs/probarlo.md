@@ -64,8 +64,14 @@ no llega a cobrar nada (ver [despliegue.md](despliegue.md)).
 
 ### 1.4 Traer el código
 
-El repositorio es **privado**, así que hay que identificarse en GitHub. Mira
-primero si Cloud Shell trae la herramienta de GitHub:
+```bash
+git clone -b claude/instagram-recipe-app-ypfz15 https://github.com/Healingwig/Home.git recetas
+```
+
+<details>
+<summary>Si el repositorio es privado, hay que identificarse antes</summary>
+
+Mira si Cloud Shell trae la herramienta de GitHub:
 
 ```bash
 command -v gh
@@ -87,7 +93,7 @@ gh repo clone Healingwig/Home recetas -- -b claude/instagram-recipe-app-ypfz15
 
 **Si no contesta nada**, usa un token de acceso:
 
-1. En la tablet, ve a <https://github.com/settings/personal-access-tokens/new>
+1. Ve a <https://github.com/settings/personal-access-tokens/new>
 2. **Repository access** → *Only select repositories* → `Healingwig/Home`
 3. **Permissions** → *Repository permissions* → **Contents: Read-only**
 4. **Generate token** y copia el `github_pat_...`
@@ -97,10 +103,7 @@ git clone -b claude/instagram-recipe-app-ypfz15 \
   https://TU-TOKEN@github.com/Healingwig/Home.git recetas
 ```
 
-> Si algún día prefieres ahorrarte esto, puedes poner el repositorio en público
-> desde GitHub (*Settings → General → Change visibility*): en el código no hay
-> ninguna clave, solo el `.env.example` con huecos. Es cosa tuya; funciona
-> igual de las dos maneras.
+</details>
 
 ### 1.5 Desplegar
 
