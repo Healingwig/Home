@@ -204,6 +204,36 @@ receta aparece en la web y los ingredientes están en Recordatorios.
 
 ---
 
+## Errores frecuentes de Gemini
+
+**«El modelo X ya no está disponible»** — Google retira modelos cada pocos
+meses y el propio error nombra el sustituto. Se cambia sin redesplegar:
+
+```bash
+gcloud run services update recetas --region us-central1 \
+  --update-env-vars "GEMINI_MODEL=el-que-diga-el-error"
+```
+
+**«Gemini rechazó la clave»** — el mensaje te dice si la clave está cortada, si
+no es de AI Studio o si está bien formada pero Google no la acepta. Puedes
+comprobarla tú mismo desde Cloud Shell:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H "x-goog-api-key: TU-CLAVE" \
+  https://generativelanguage.googleapis.com/v1beta/models
+```
+
+`200` significa que la clave es buena. Cualquier otra cosa, saca una nueva en
+<https://aistudio.google.com/apikey> y ponla con:
+
+```bash
+gcloud run services update recetas --region us-central1 \
+  --update-env-vars "GEMINI_API_KEY=AIza..."
+```
+
+---
+
 ## Las cookies de Instagram (el punto pegajoso)
 
 Instagram exige sesión iniciada para muchos reels, y desde un servidor de

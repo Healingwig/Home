@@ -123,11 +123,13 @@ def test_gemini_intercala_texto_e_imagenes(monkeypatch, frame):
         "app.pipeline.providers.gemini_provider.httpx.post", _fake_post(capture, _response(200, payload))
     )
 
-    provider = GeminiProvider(api_key="clave", model="gemini-2.5-flash")
+    provider = GeminiProvider(api_key="clave", model="gemini-3.6-flash")
     assert provider.generate("sistema", [("text", "hola"), ("image", frame)]) == '{"title":"x"}'
 
     body = capture["json"]
-    assert capture["params"] == {"key": "clave"}
+    # La clave viaja en cabecera, nunca en la URL (acabaría en los registros).
+    assert capture["headers"] == {"x-goog-api-key": "clave"}
+    assert "clave" not in capture["url"]
     assert body["systemInstruction"]["parts"][0]["text"] == "sistema"
     partes = body["contents"][0]["parts"]
     assert partes[0] == {"text": "hola"}
@@ -214,3 +216,61 @@ def test_gemini_manda_el_video_con_su_tipo_mime(monkeypatch, tmp_path):
 def test_solo_gemini_acepta_el_video_entero():
     assert get_provider("gemini").accepts_video is True
     assert get_provider("ollama").accepts_video is False
+
+
+# --- Errores de Gemini traducidos a algo accionable -------------------------
+
+def _gemini_falla(monkeypatch, status, cuerpo):
+    monkeypatch.setattr(
+        "app.pipeline.providers.gemini_provider.httpx.post",
+        _fake_post({}, _response(status, cuerpo)),
+    )
+
+
+def test_un_modelo_retirado_dice_cual_usar_y_como_cambiarlo(monkeypatch):
+    _gemini_falla(monkeypatch, 404, '{"error": {"message": "This model models/gemini-2.5-flash '
+                                    'is no longer available to new users. Please update your code '
+                                    'to use models/gemini-3.6-flash for the latest features."}}')
+    with pytest.raises(ProviderError) as fallo:
+        GeminiProvider(api_key="AIza" + "x" * 35, model="gemini-2.5-flash").generate("s", [("text", "t")])
+
+    mensaje = str(fallo.value)
+    assert "gemini-3.6-flash" in mensaje
+    assert "GEMINI_MODEL=gemini-3.6-flash" in mensaje
+
+
+def test_un_modelo_desconocido_manda_a_la_lista_de_modelos(monkeypatch):
+    _gemini_falla(monkeypatch, 404, '{"error": {"message": "not found"}}')
+    with pytest.raises(ProviderError, match="docs/models"):
+        GeminiProvider(api_key="AIza" + "x" * 35, model="inventado").generate("s", [("text", "t")])
+
+
+def test_un_401_no_devuelve_el_json_crudo_de_google(monkeypatch):
+    _gemini_falla(monkeypatch, 401, '{"error": {"message": "Request had invalid authentication '
+                                    'credentials. Expected OAuth 2 access token"}}')
+    with pytest.raises(ProviderError) as fallo:
+        GeminiProvider(api_key="AIza" + "x" * 35).generate("s", [("text", "t")])
+
+    mensaje = str(fallo.value)
+    assert "OAuth" not in mensaje
+    assert "Generative Language API" in mensaje
+
+
+def test_una_clave_que_no_es_de_ai_studio_se_detecta_por_el_prefijo(monkeypatch):
+    _gemini_falla(monkeypatch, 401, "{}")
+    with pytest.raises(ProviderError, match="no parece una clave de AI Studio"):
+        GeminiProvider(api_key="mi-contraseña-de-la-web").generate("s", [("text", "t")])
+
+
+def test_una_clave_cortada_al_pegarla_se_detecta_por_la_longitud(monkeypatch):
+    _gemini_falla(monkeypatch, 400, '{"error": {"message": "API key not valid"}}')
+    with pytest.raises(ProviderError, match="parece cortada"):
+        GeminiProvider(api_key="AIzaSyB123").generate("s", [("text", "t")])
+
+
+def test_el_mensaje_de_error_nunca_incluye_la_clave_entera(monkeypatch):
+    clave = "AIzaSyD-SECRETO-QUE-NO-DEBE-SALIR-1234"
+    _gemini_falla(monkeypatch, 401, "{}")
+    with pytest.raises(ProviderError) as fallo:
+        GeminiProvider(api_key=clave).generate("s", [("text", "t")])
+    assert clave not in str(fallo.value)

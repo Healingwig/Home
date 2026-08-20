@@ -152,6 +152,20 @@ durante ese rato, así que no tienes que hacer nada.
 
 ---
 
+## Si Google retira el modelo
+
+Pasa cada pocos meses. El error de la app nombra el sustituto que recomienda
+Google, y se cambia sin redesplegar:
+
+```bash
+gcloud run services update recetas --region us-central1 \
+  --update-env-vars "GEMINI_MODEL=el-que-diga-el-error"
+```
+
+La lista completa está en <https://ai.google.dev/gemini-api/docs/models>.
+
+---
+
 ## Cómo lee el vídeo
 
 Con Gemini se le manda **el vídeo entero**, recomprimido para que quepa en una

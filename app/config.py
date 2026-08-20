@@ -111,7 +111,7 @@ class Settings:
             ollama_model=os.getenv("OLLAMA_MODEL", "qwen2.5vl:7b"),
             ollama_timeout=_env_int("OLLAMA_TIMEOUT", 900),
             gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
-            gemini_model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.6-flash"),
             anthropic_model=os.getenv("CLAUDE_MODEL", "claude-opus-5"),
             max_tokens=_env_int("CLAUDE_MAX_TOKENS", 16000),
             effort=os.getenv("CLAUDE_EFFORT", "high"),

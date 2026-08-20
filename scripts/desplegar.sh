@@ -44,8 +44,24 @@ if [ -n "$EXISTENTES" ]; then
   echo "El servicio ya está desplegado: se conservan las claves que ya tiene."
   VARIABLES="STORAGE_BACKEND=gcs,GCS_BUCKET=$CUBO,LLM_PROVIDER=gemini,DATA_DIR=/tmp/recetas"
 else
-  read -rsp "Clave de Gemini (https://aistudio.google.com/apikey): " GEMINI_KEY; echo
-  [ -n "$GEMINI_KEY" ] || error "Sin clave de Gemini no se puede generar ninguna receta."
+  # La clave se pide en claro a propósito: en una tablet, un pegado fallido en
+  # un campo oculto no se nota y el fallo aparece mucho después, al procesar
+  # el primer reel, disfrazado de error de autenticación.
+  for intento in 1 2 3; do
+    read -rp "Clave de Gemini (https://aistudio.google.com/apikey): " GEMINI_KEY
+    GEMINI_KEY="$(printf '%s' "$GEMINI_KEY" | tr -d '[:space:]')"
+    if [ -z "$GEMINI_KEY" ]; then
+      echo "  No has pegado nada. Inténtalo otra vez."
+    elif [ "${GEMINI_KEY#AIza}" = "$GEMINI_KEY" ]; then
+      echo "  Eso no parece una clave de AI Studio: todas empiezan por 'AIza'."
+    elif [ "${#GEMINI_KEY}" -lt 35 ]; then
+      echo "  Parece cortada (${#GEMINI_KEY} caracteres; suelen tener 39). Cópiala entera."
+    else
+      echo "  Recibida: ${GEMINI_KEY:0:6}…${GEMINI_KEY: -4} (${#GEMINI_KEY} caracteres)"
+      break
+    fi
+    [ "$intento" -lt 3 ] || error "Sin una clave válida no se puede generar ninguna receta."
+  done
 
   read -rp "Contraseña para entrar a la web desde la tablet: " PASSWORD
   [ -n "$PASSWORD" ] || error "Hace falta una contraseña."
@@ -53,6 +69,16 @@ else
   API_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
   VARIABLES="STORAGE_BACKEND=gcs,GCS_BUCKET=$CUBO,LLM_PROVIDER=gemini,DATA_DIR=/tmp/recetas"
   VARIABLES="$VARIABLES,GEMINI_API_KEY=$GEMINI_KEY,API_KEY=$API_KEY,APP_PASSWORD=$PASSWORD"
+
+  echo "  Comprobando la clave contra Google…"
+  RESPUESTA="$(curl -s -o /dev/null -w '%{http_code}' \
+      -H "x-goog-api-key: $GEMINI_KEY" \
+      "https://generativelanguage.googleapis.com/v1beta/models" || echo "000")"
+  case "$RESPUESTA" in
+    200) echo "  La clave funciona." ;;
+    000) echo "  No se pudo comprobar (sin red). Seguimos igualmente." ;;
+    *)   error "Google rechaza la clave (HTTP $RESPUESTA). Saca otra en https://aistudio.google.com/apikey" ;;
+  esac
 fi
 
 # --update-env-vars, no --set-env-vars: el segundo reemplaza TODAS las
