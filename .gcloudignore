@@ -1,0 +1,16 @@
+# Lo que no hace falta subir para construir la imagen. Sin este fichero,
+# gcloud subiría también el entorno virtual y los datos locales.
+.git/
+.gitignore
+.venv/
+venv/
+data/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+docs/
+scripts/
+*.md
+.env
+cookies_instagram.txt

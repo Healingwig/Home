@@ -41,7 +41,7 @@ EXISTENTES="$(gcloud run services describe "$SERVICIO" --region "$REGION" \
     --format='value(spec.template.spec.containers[0].env)' 2>/dev/null || true)"
 
 if [ -n "$EXISTENTES" ]; then
-  echo "El servicio ya está desplegado: se conservan las claves que tiene."
+  echo "El servicio ya está desplegado: se conservan las claves que ya tiene."
   VARIABLES="STORAGE_BACKEND=gcs,GCS_BUCKET=$CUBO,LLM_PROVIDER=gemini,DATA_DIR=/tmp/recetas"
 else
   read -rsp "Clave de Gemini (https://aistudio.google.com/apikey): " GEMINI_KEY; echo
@@ -55,6 +55,8 @@ else
   VARIABLES="$VARIABLES,GEMINI_API_KEY=$GEMINI_KEY,API_KEY=$API_KEY,APP_PASSWORD=$PASSWORD"
 fi
 
+# --update-env-vars, no --set-env-vars: el segundo reemplaza TODAS las
+# variables del servicio, así que un redespliegue borraría las claves.
 info "4/4 Desplegando (la primera vez tarda unos minutos: construye la imagen)…"
 gcloud run deploy "$SERVICIO" \
   --source . \
@@ -64,7 +66,7 @@ gcloud run deploy "$SERVICIO" \
   --cpu 1 \
   --timeout 300 \
   --max-instances 2 \
-  --set-env-vars "$VARIABLES" \
+  --update-env-vars "$VARIABLES" \
   --quiet
 
 URL="$(gcloud run services describe "$SERVICIO" --region "$REGION" --format='value(status.url)')"
